@@ -1,0 +1,17 @@
+{
+  "name": "mi-plataforma-sushi",
+  "version": "1.0.0",
+  "description": "Plataforma SaaS comida con Stripe",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "socket.io": "^4.7.2",
+    "stripe": "^14.14.0",
+    "mongoose": "^8.2.0"
+  }
+}

@@ -72,7 +72,8 @@ const Shop = mongoose.model('Shop', ShopSchema);
 // --- MIDDLEWARES ---
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-app.use(express.static('public'));
+// Servir archivos estáticos desde la raíz (para que encuentre style.css o scripts si los hubiera)
+app.use(express.static(__dirname));
 
 // --- SOCKET.IO EVENTS (TIEMPO REAL) ---
 io.on('connection', (socket) => {
@@ -315,9 +316,9 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// RUTAS VISTAS
-app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
-app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
-app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
+// RUTAS VISTAS (CORREGIDAS PARA ARCHIVOS EN RAÍZ)
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'landing.html')); });
+app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
+app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'admin.html')); });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

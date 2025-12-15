@@ -6,7 +6,15 @@ const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const https = require('https');
-require('dotenv').config(); // Cargar variables de entorno si existen .env
+
+// --- CORRECCIÓN PARA RENDER ---
+// Envolvemos dotenv en un try-catch. Si no está instalado (como en Render),
+// el servidor no se romperá y usará las variables de entorno del panel.
+try {
+    require('dotenv').config(); 
+} catch (e) {
+    console.log("Nota: 'dotenv' no encontrado. Usando variables de entorno del sistema (OK en Producción).");
+}
 
 const app = express();
 const server = http.createServer(app);

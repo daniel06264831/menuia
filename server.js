@@ -12,12 +12,7 @@ const stripe = require('stripe')('sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagi
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "*", // Permitir conexión de Socket.io desde tu hosting
-        methods: ["GET", "POST"]
-    }
-});
+const io = new Server(server);
 
 const PORT = process.env.PORT || 3000; // Render usa process.env.PORT
 
@@ -70,20 +65,20 @@ const ShopSchema = new mongoose.Schema({
         extras: [mongoose.Schema.Types.Mixed],
         groups: [mongoose.Schema.Types.Mixed] // Grupos de modificadores
     }
-}, { timestamps: true });
+}, { timestamps: true }); // Agrega createdAt y updatedAt automáticamente
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
 // --- MIDDLEWARES ---
-// Permitir CORS para que tu hosting pueda pedir datos a Render
-app.use(cors({ origin: '*' })); 
+app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
+app.use(express.static('public'));
 
 // --- SOCKET.IO EVENTS (TIEMPO REAL) ---
 io.on('connection', (socket) => {
     socket.on('join-store', (slug) => { socket.join(slug); });
     
-    // Nueva Visita
+    // Nueva Visita (Incremento atómico en Mongo)
     socket.on('register-visit', async (slug) => {
         try {
             const shop = await Shop.findOneAndUpdate(
@@ -157,7 +152,7 @@ const geocodeAddress = (address) => {
 // --- RUTAS DE PAGO (STRIPE) ---
 app.post('/api/create-subscription', async (req, res) => {
     const { slug } = req.body;
-    const domain = req.headers.origin || req.headers.referer; // Usar el dominio que llama a la API (tu hosting)
+    const domain = `${req.protocol}://${req.get('host')}`; // Detecta dominio automáticamente
     try {
         const session = await stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -166,14 +161,13 @@ app.post('/api/create-subscription', async (req, res) => {
                 price_data: { 
                     currency: 'mxn', 
                     product_data: { name: 'Plan Menú Digital PRO' }, 
-                    unit_amount: 10000, 
+                    unit_amount: 10000, // $100.00 MXN
                     recurring: { interval: 'month' } 
                 }, 
                 quantity: 1 
             }],
-            // Redirigir al hosting, no a localhost/render
-            success_url: `${domain}/admin.html?success=subscription&slug=${slug}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${domain}/admin.html?canceled=true`,
+            success_url: `${domain}/api/subscription-success?slug=${slug}&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${domain}/admin?canceled=true`,
         });
         res.json({ url: session.url });
     } catch (e) { 
@@ -182,20 +176,43 @@ app.post('/api/create-subscription', async (req, res) => {
     }
 });
 
+app.get('/api/subscription-success', async (req, res) => {
+    const { slug } = req.query;
+    if (slug) {
+        await Shop.findOneAndUpdate({ slug }, {
+            'subscription.status': 'active',
+            'subscription.plan': 'pro_monthly',
+            'subscription.validUntil': null // Indefinido mientras pague
+        });
+    }
+    res.redirect('/admin?success=subscription');
+});
+
 // --- RUTAS API DEL SISTEMA ---
 
+// REGISTRO
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
+    console.log(`[REGISTER] Intento: ${slug}`);
+    
     if (!slug || !restaurantName || !password) return res.status(400).json({ error: "Datos incompletos" });
+    
     try {
         const existing = await Shop.findOne({ slug });
         if (existing) return res.status(400).json({ error: "Ese nombre de tienda ya existe." });
+
         const newShopData = getTemplateShop(slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType);
         await Shop.create(newShopData);
+        
+        console.log(`[REGISTER] Creado: ${slug}`);
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: "Error interno" }); }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error interno" });
+    }
 });
 
+// LOGIN (Simple Check)
 app.post('/api/login', async (req, res) => {
     const { slug, password } = req.body;
     try {
@@ -205,52 +222,83 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error" }); }
 });
 
+// GET TIENDA (PÚBLICO)
 app.get('/api/shop/:slug', async (req, res) => {
     try {
-        const shop = await Shop.findOne({ slug: req.params.slug }).lean();
+        const shop = await Shop.findOne({ slug: req.params.slug }).lean(); // .lean() para objeto JS plano
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
+
+        // Verificar Vencimiento
         const now = new Date();
         let isExpired = false;
         if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
             isExpired = true;
+            // Actualizar DB sin bloquear respuesta
             Shop.updateOne({ _id: shop._id }, { 'subscription.status': 'expired' }).exec();
-        } else if (shop.subscription.status === 'expired') isExpired = true;
+        } else if (shop.subscription.status === 'expired') {
+            isExpired = true;
+        }
+
+        // Limpiar credenciales antes de enviar
         delete shop.credentials;
         shop.isExpired = isExpired;
+
         res.json(shop);
-    } catch (e) { res.status(500).json({ error: "Error servidor" }); }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error servidor" });
+    }
 });
 
+// ADMIN GET (CON LOGIN)
 app.post('/api/admin/get', async (req, res) => {
     const { slug, password } = req.body;
     try {
-        const shop = await Shop.findOne({ slug });
+        const shop = await Shop.findOne({ slug }); // Mongoose Document
+        
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
         if (shop.credentials.password !== password) return res.status(401).json({ error: "Contraseña incorrecta" });
-        if (!shop.subscription) { // Self-healing
-            const trialEnds = new Date(); trialEnds.setDate(trialEnds.getDate() + 15);
-            shop.subscription = { status: 'trial', plan: 'free', validUntil: trialEnds.toISOString() };
+
+        // Chequeo de expiración al login
+        const now = new Date();
+        if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
+            shop.subscription.status = 'expired';
             await shop.save();
         }
+
         res.json(shop);
-    } catch (e) { res.status(500).json({ error: "Error interno" }); }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error interno" });
+    }
 });
 
+// GUARDAR CAMBIOS (ADMIN)
 app.post('/api/shop/:slug', async (req, res) => {
     const { slug } = req.params;
     const { password, data } = req.body;
+    
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "No encontrado" });
         if (shop.credentials.password !== password) return res.status(403).json({ error: "No autorizado" });
+
+        // Actualizar campos permitidos
         shop.config = data.config;
         shop.menu = data.menu;
+        
+        // Mongoose maneja la mezcla de objetos, pero para Arrays anidados reemplazamos completo
         await shop.save();
+        
         io.to(slug).emit('shop-updated', { message: 'Datos actualizados' });
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: "Error al guardar" }); }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error al guardar" });
+    }
 });
 
+// UTILIDAD MAPAS
 app.post('/api/utils/parse-map', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Entrada vacía" });
@@ -267,9 +315,38 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// Ruta raíz para confirmar que la API está viva
+// --- HELPER PARA CARGAR VISTAS EXTERNAS (PROXY GITHUB) ---
+// Esto permite cargar los HTML desde GitHub pero servirlos bajo tu dominio
+// manteniendo las rutas como /tienda/:slug y /admin intactas.
+const fetchExternal = (url, res) => {
+    https.get(url, (response) => {
+        let data = '';
+        response.on('data', (chunk) => data += chunk);
+        response.on('end', () => {
+            res.writeHead(200, {'Content-Type': 'text/html'});
+            res.end(data);
+        });
+    }).on('error', (err) => {
+        console.error("Error fetching external HTML:", err);
+        res.status(500).send("Error loading external interface.");
+    });
+};
+
+// --- RUTAS VISTAS (MODIFICADAS) ---
+// Ahora obtienen el contenido directamente de tu GitHub Pages
 app.get('/', (req, res) => { 
-    res.send("🚀 API MenúIA funcionando correctamente. Conecta tu frontend desde tu hosting."); 
+    // index.html en tu GitHub es la Landing Page
+    fetchExternal('https://iamenu.github.io/menuia/index.html', res); 
+});
+
+app.get('/tienda/:slug', (req, res) => { 
+    // menu.html en tu GitHub es la Tienda
+    fetchExternal('https://iamenu.github.io/menuia/menu.html', res); 
+});
+
+app.get('/admin', (req, res) => { 
+    // admin.html en tu GitHub es el Admin
+    fetchExternal('https://iamenu.github.io/menuia/admin.html', res); 
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

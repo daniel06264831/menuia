@@ -1,24 +1,37 @@
 const express = require('express');
 const http = require('http'); 
 const { Server } = require("socket.io");
-const mongoose = require('mongoose'); // Importamos Mongoose
+const mongoose = require('mongoose');
 const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const https = require('https');
-
-// Clave Secreta de Stripe (Test Mode)
-const stripe = require('stripe')('sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH');
+require('dotenv').config(); // Cargar variables de entorno si existen .env
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
 
-const PORT = process.env.PORT || 3000; // Render usa process.env.PORT
+// --- CONFIGURACIÓN CRÍTICA DE SOCKET.IO ---
+// Soluciona el problema de comunicación entre Frontend (admin.html) y Backend
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Permite conexión desde cualquier origen (localhost, GitHub Pages, Render, etc.)
+        methods: ["GET", "POST"],
+        allowedHeaders: ["my-custom-header"],
+        credentials: true
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+
+// --- VARIABLES DE ENTORNO Y CREDENCIALES ---
+// Usamos process.env para seguridad, con fallback a tus valores actuales (solo para desarrollo)
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
+
+const stripe = require('stripe')(STRIPE_KEY);
 
 // --- CONEXIÓN A MONGODB ATLAS ---
-const MONGO_URI = "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
-
 mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Conectado exitosamente a MongoDB Atlas'))
     .catch(err => console.error('❌ Error conectando a Mongo:', err));
@@ -63,23 +76,32 @@ const ShopSchema = new mongoose.Schema({
         especiales: [mongoose.Schema.Types.Mixed], 
         clasicos: [mongoose.Schema.Types.Mixed], 
         extras: [mongoose.Schema.Types.Mixed],
-        groups: [mongoose.Schema.Types.Mixed] // Grupos de modificadores
+        groups: [mongoose.Schema.Types.Mixed]
     }
-}, { timestamps: true }); // Agrega createdAt y updatedAt automáticamente
+}, { timestamps: true });
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
 // --- MIDDLEWARES ---
-app.use(cors());
+app.use(cors()); // CORS para rutas HTTP normales
 app.use(bodyParser.json({ limit: '50mb' }));
-app.use(express.static('public'));
+
+// Servir archivos estáticos: Intenta 'public' primero, luego la raíz (para desarrollo local fácil)
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
 // --- SOCKET.IO EVENTS (TIEMPO REAL) ---
 io.on('connection', (socket) => {
-    socket.on('join-store', (slug) => { socket.join(slug); });
+    console.log(`🔌 Nuevo cliente conectado: ${socket.id}`);
+
+    socket.on('join-store', (slug) => { 
+        socket.join(slug); 
+        console.log(`socket ${socket.id} se unió a la sala: ${slug}`);
+    });
     
-    // Nueva Visita (Incremento atómico en Mongo)
+    // Nueva Visita
     socket.on('register-visit', async (slug) => {
+        console.log(`👀 Nueva visita en: ${slug}`);
         try {
             const shop = await Shop.findOneAndUpdate(
                 { slug }, 
@@ -92,6 +114,7 @@ io.on('connection', (socket) => {
 
     // Nuevo Pedido
     socket.on('register-order', async (slug) => {
+        console.log(`📦 Nuevo pedido en: ${slug}`);
         try {
             const shop = await Shop.findOneAndUpdate(
                 { slug }, 
@@ -103,6 +126,10 @@ io.on('connection', (socket) => {
                 io.to(slug).emit('order-notification', { message: '¡Nuevo Pedido!' });
             }
         } catch (e) { console.error("Error stats order:", e); }
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Cliente desconectado');
     });
 });
 
@@ -152,7 +179,7 @@ const geocodeAddress = (address) => {
 // --- RUTAS DE PAGO (STRIPE) ---
 app.post('/api/create-subscription', async (req, res) => {
     const { slug } = req.body;
-    const domain = `${req.protocol}://${req.get('host')}`; // Dominio del backend (Render)
+    const domain = `${req.protocol}://${req.get('host')}`; 
     try {
         const session = await stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -161,13 +188,12 @@ app.post('/api/create-subscription', async (req, res) => {
                 price_data: { 
                     currency: 'mxn', 
                     product_data: { name: 'Plan Menú Digital PRO' }, 
-                    unit_amount: 10000, // $100.00 MXN
+                    unit_amount: 10000, 
                     recurring: { interval: 'month' } 
                 }, 
                 quantity: 1 
             }],
             success_url: `${domain}/api/subscription-success?slug=${slug}&session_id={CHECKOUT_SESSION_ID}`,
-            // Redirigir a GitHub Pages en caso de cancelación
             cancel_url: 'https://iamenu.github.io/menuia/admin.html?canceled=true',
         });
         res.json({ url: session.url });
@@ -183,10 +209,9 @@ app.get('/api/subscription-success', async (req, res) => {
         await Shop.findOneAndUpdate({ slug }, {
             'subscription.status': 'active',
             'subscription.plan': 'pro_monthly',
-            'subscription.validUntil': null // Indefinido mientras pague
+            'subscription.validUntil': null 
         });
     }
-    // Redirigir a GitHub Pages tras éxito
     res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
@@ -227,21 +252,18 @@ app.post('/api/login', async (req, res) => {
 // GET TIENDA (PÚBLICO)
 app.get('/api/shop/:slug', async (req, res) => {
     try {
-        const shop = await Shop.findOne({ slug: req.params.slug }).lean(); // .lean() para objeto JS plano
+        const shop = await Shop.findOne({ slug: req.params.slug }).lean();
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
 
-        // Verificar Vencimiento
         const now = new Date();
         let isExpired = false;
         if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
             isExpired = true;
-            // Actualizar DB sin bloquear respuesta
             Shop.updateOne({ _id: shop._id }, { 'subscription.status': 'expired' }).exec();
         } else if (shop.subscription.status === 'expired') {
             isExpired = true;
         }
 
-        // Limpiar credenciales antes de enviar
         delete shop.credentials;
         shop.isExpired = isExpired;
 
@@ -256,12 +278,11 @@ app.get('/api/shop/:slug', async (req, res) => {
 app.post('/api/admin/get', async (req, res) => {
     const { slug, password } = req.body;
     try {
-        const shop = await Shop.findOne({ slug }); // Mongoose Document
+        const shop = await Shop.findOne({ slug });
         
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
         if (shop.credentials.password !== password) return res.status(401).json({ error: "Contraseña incorrecta" });
 
-        // Chequeo de expiración al login
         const now = new Date();
         if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
             shop.subscription.status = 'expired';
@@ -285,11 +306,9 @@ app.post('/api/shop/:slug', async (req, res) => {
         if (!shop) return res.status(404).json({ error: "No encontrado" });
         if (shop.credentials.password !== password) return res.status(403).json({ error: "No autorizado" });
 
-        // Actualizar campos permitidos
         shop.config = data.config;
         shop.menu = data.menu;
         
-        // Mongoose maneja la mezcla de objetos, pero para Arrays anidados reemplazamos completo
         await shop.save();
         
         io.to(slug).emit('shop-updated', { message: 'Datos actualizados' });
@@ -317,7 +336,7 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// RUTAS VISTAS (Estas son opcionales si usas GitHub Pages para el frontend)
+// RUTAS VISTAS
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });

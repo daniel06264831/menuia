@@ -152,7 +152,7 @@ const geocodeAddress = (address) => {
 // --- RUTAS DE PAGO (STRIPE) ---
 app.post('/api/create-subscription', async (req, res) => {
     const { slug } = req.body;
-    const domain = `${req.protocol}://${req.get('host')}`; // Detecta dominio automáticamente
+    const domain = `${req.protocol}://${req.get('host')}`; // Dominio del backend (Render)
     try {
         const session = await stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -167,7 +167,8 @@ app.post('/api/create-subscription', async (req, res) => {
                 quantity: 1 
             }],
             success_url: `${domain}/api/subscription-success?slug=${slug}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${domain}/admin?canceled=true`,
+            // Redirigir a GitHub Pages en caso de cancelación
+            cancel_url: 'https://iamenu.github.io/menuia/admin.html?canceled=true',
         });
         res.json({ url: session.url });
     } catch (e) { 
@@ -185,7 +186,8 @@ app.get('/api/subscription-success', async (req, res) => {
             'subscription.validUntil': null // Indefinido mientras pague
         });
     }
-    res.redirect('/admin?success=subscription');
+    // Redirigir a GitHub Pages tras éxito
+    res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
 // --- RUTAS API DEL SISTEMA ---
@@ -315,7 +317,7 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// RUTAS VISTAS
+// RUTAS VISTAS (Estas son opcionales si usas GitHub Pages para el frontend)
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });

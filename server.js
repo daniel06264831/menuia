@@ -315,38 +315,9 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// --- HELPER PARA CARGAR VISTAS EXTERNAS (PROXY GITHUB) ---
-// Esto permite cargar los HTML desde GitHub pero servirlos bajo tu dominio
-// manteniendo las rutas como /tienda/:slug y /admin intactas.
-const fetchExternal = (url, res) => {
-    https.get(url, (response) => {
-        let data = '';
-        response.on('data', (chunk) => data += chunk);
-        response.on('end', () => {
-            res.writeHead(200, {'Content-Type': 'text/html'});
-            res.end(data);
-        });
-    }).on('error', (err) => {
-        console.error("Error fetching external HTML:", err);
-        res.status(500).send("Error loading external interface.");
-    });
-};
-
-// --- RUTAS VISTAS (MODIFICADAS) ---
-// Ahora obtienen el contenido directamente de tu GitHub Pages
-app.get('/', (req, res) => { 
-    // index.html en tu GitHub es la Landing Page
-    fetchExternal('https://iamenu.github.io/menuia/index.html', res); 
-});
-
-app.get('/tienda/:slug', (req, res) => { 
-    // menu.html en tu GitHub es la Tienda
-    fetchExternal('https://iamenu.github.io/menuia/menu.html', res); 
-});
-
-app.get('/admin', (req, res) => { 
-    // admin.html en tu GitHub es el Admin
-    fetchExternal('https://iamenu.github.io/menuia/admin.html', res); 
-});
+// RUTAS VISTAS
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
+app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
+app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

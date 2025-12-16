@@ -40,6 +40,8 @@ mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Conectado exitosamente a MongoDB Atlas'))
     .catch(err => console.error('❌ Error conectando a Mongo:', err));
 
+// --- SCHEMAS ---
+
 const ShopSchema = new mongoose.Schema({
     slug: { type: String, required: true, unique: true, index: true },
     credentials: {
@@ -48,12 +50,11 @@ const ShopSchema = new mongoose.Schema({
         contactPhone: String
     },
     subscription: { 
-        status: { type: String, default: 'trial' }, // trial, active, expired
+        status: { type: String, default: 'trial' }, 
         plan: { type: String, default: 'free' }, 
         validUntil: Date,
         startDate: { type: Date, default: Date.now }
     },
-    // CORRECCIÓN: stats ahora incluye lastReset para control diario
     stats: { 
         visits: { type: Number, default: 0 }, 
         orders: { type: Number, default: 0 },
@@ -87,20 +88,32 @@ const ShopSchema = new mongoose.Schema({
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
+// NUEVO: Schema para Pedidos (Historial)
+const OrderSchema = new mongoose.Schema({
+    shopSlug: { type: String, required: true, index: true },
+    ref: String, // Mesa # o Nombre Cliente
+    type: String, // 'mesa' o 'llevar'
+    items: [mongoose.Schema.Types.Mixed], // Array de items con qty, price, options
+    total: String, // Guardamos el total formateado o numérico
+    status: { type: String, default: 'pending' }, // pending, completed, cancelled
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Order = mongoose.model('Order', OrderSchema);
+
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 // --- HELPERS STATS DIARIOS ---
-// Función para reiniciar stats si cambió el día
 const checkDailyReset = (shop) => {
-    const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD (Zona local del servidor)
+    const today = new Date().toLocaleDateString('en-CA'); 
     if (shop.stats.lastReset !== today) {
         shop.stats.visits = 0;
         shop.stats.orders = 0;
         shop.stats.lastReset = today;
-        return true; // Hubo reset
+        return true; 
     }
     return false;
 };
@@ -113,12 +126,11 @@ io.on('connection', (socket) => {
         socket.join(slug); 
     });
     
-    // Nueva Visita (Lógica corregida para "Hoy")
     socket.on('register-visit', async (slug) => {
         try {
             let shop = await Shop.findOne({ slug });
             if (shop) {
-                checkDailyReset(shop); // Resetea si es nuevo día
+                checkDailyReset(shop); 
                 shop.stats.visits += 1;
                 await shop.save();
                 io.to(slug).emit('stats-update', shop.stats);
@@ -126,14 +138,40 @@ io.on('connection', (socket) => {
         } catch (e) { console.error("Error stats visit:", e); }
     });
 
-    // Nuevo Pedido (Lógica corregida para "Hoy")
-    socket.on('register-order', async (slug) => {
+    // MODIFICADO: Ahora recibe payload completo { slug, order } o solo slug (compatibilidad)
+    socket.on('register-order', async (payload) => {
+        let slug = payload;
+        let orderData = null;
+
+        // Si el payload es un objeto con la orden, lo extraemos
+        if (typeof payload === 'object' && payload.slug) {
+            slug = payload.slug;
+            orderData = payload.order;
+        }
+
         try {
             let shop = await Shop.findOne({ slug });
             if (shop) {
                 checkDailyReset(shop);
                 shop.stats.orders += 1;
                 await shop.save();
+
+                // NUEVO: Guardar en Base de Datos si hay datos de orden
+                if (orderData) {
+                    await Order.create({
+                        shopSlug: slug,
+                        ref: orderData.ref,
+                        type: orderData.type,
+                        items: orderData.items,
+                        total: orderData.total,
+                        status: orderData.status || 'pending',
+                        createdAt: new Date()
+                    });
+                    
+                    // Notificar al panel admin para que refresque la tabla
+                    io.to(slug).emit('new-order-saved');
+                }
+
                 io.to(slug).emit('stats-update', shop.stats);
                 io.to(slug).emit('order-notification', { message: '¡Nuevo Pedido!' });
             }
@@ -225,7 +263,7 @@ app.get('/api/subscription-success', async (req, res) => {
     res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
-// --- RUTAS API STANDARD ---
+// --- RUTAS API ---
 
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
@@ -271,7 +309,6 @@ app.post('/api/admin/get', async (req, res) => {
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
         if (shop.credentials.password !== password) return res.status(401).json({ error: "Contraseña incorrecta" });
         
-        // Check Daily Reset on Admin Load too
         if (checkDailyReset(shop)) await shop.save();
 
         res.json(shop);
@@ -309,55 +346,64 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// --- RUTAS SUPER ADMIN (NUEVAS) ---
+// --- RUTAS NUEVAS PARA PEDIDOS (ORDERS) ---
 
-// 1. Listar todas las tiendas (Requiere Master Password)
+// Obtener lista de pedidos
+app.post('/api/orders/list', async (req, res) => {
+    const { slug, password } = req.body;
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
+
+        // Traer últimos 50 pedidos, del más nuevo al más viejo
+        const orders = await Order.find({ shopSlug: slug }).sort({ createdAt: -1 }).limit(100);
+        res.json({ success: true, orders });
+    } catch (e) { res.status(500).json({ error: "Error obteniendo pedidos" }); }
+});
+
+// Actualizar estado del pedido (Pendiente -> Completado)
+app.post('/api/orders/update-status', async (req, res) => {
+    const { slug, password, orderId, status } = req.body;
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
+
+        await Order.findByIdAndUpdate(orderId, { status });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
+});
+
+// --- RUTAS SUPER ADMIN ---
+
 app.post('/api/superadmin/list', async (req, res) => {
     const { masterKey } = req.body;
     if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
-
     try {
-        // Traemos solo los campos necesarios para la tabla
         const shops = await Shop.find({}, 'slug config.name config.businessType stats subscription updatedAt createdAt credentials.contactPhone').sort({ createdAt: -1 });
         res.json({ success: true, shops });
-    } catch (e) {
-        res.status(500).json({ error: "Error interno" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error interno" }); }
 });
 
-// 2. Aprobar Pago Manualmente (Requiere Master Password)
 app.post('/api/superadmin/approve-payment', async (req, res) => {
     const { masterKey, slug, months } = req.body;
     if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
-
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
-
         const now = new Date();
-        // Si ya tiene una fecha válida futura, sumamos a esa fecha. Si no, empezamos desde hoy.
-        let startDate = (shop.subscription.validUntil && new Date(shop.subscription.validUntil) > now) 
-            ? new Date(shop.subscription.validUntil) 
-            : now;
-
-        // Sumar meses
+        let startDate = (shop.subscription.validUntil && new Date(shop.subscription.validUntil) > now) ? new Date(shop.subscription.validUntil) : now;
         startDate.setMonth(startDate.getMonth() + parseInt(months));
-
         shop.subscription.status = 'active';
         shop.subscription.plan = 'pro_manual';
         shop.subscription.validUntil = startDate;
-
         await shop.save();
         res.json({ success: true, validUntil: startDate });
-    } catch (e) {
-        res.status(500).json({ error: "Error al activar" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error al activar" }); }
 });
-
 
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
-app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); }); // Nueva ruta
+app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

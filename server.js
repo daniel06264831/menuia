@@ -8,22 +8,18 @@ const bodyParser = require('body-parser');
 const https = require('https');
 
 // --- CORRECCIÓN PARA RENDER ---
-// Envolvemos dotenv en un try-catch. Si no está instalado (como en Render),
-// el servidor no se romperá y usará las variables de entorno del panel.
 try {
     require('dotenv').config(); 
 } catch (e) {
-    console.log("Nota: 'dotenv' no encontrado. Usando variables de entorno del sistema (OK en Producción).");
+    console.log("Nota: 'dotenv' no encontrado. Usando variables de entorno del sistema.");
 }
 
 const app = express();
 const server = http.createServer(app);
 
-// --- CONFIGURACIÓN CRÍTICA DE SOCKET.IO ---
-// Soluciona el problema de comunicación entre Frontend (admin.html) y Backend
 const io = new Server(server, {
     cors: {
-        origin: "*", // Permite conexión desde cualquier origen (localhost, GitHub Pages, Render, etc.)
+        origin: "*",
         methods: ["GET", "POST"],
         allowedHeaders: ["my-custom-header"],
         credentials: true
@@ -32,19 +28,15 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// --- VARIABLES DE ENTORNO Y CREDENCIALES ---
-// Usamos process.env para seguridad, con fallback a tus valores actuales (solo para desarrollo)
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
 const stripe = require('stripe')(STRIPE_KEY);
 
-// --- CONEXIÓN A MONGODB ATLAS ---
 mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Conectado exitosamente a MongoDB Atlas'))
     .catch(err => console.error('❌ Error conectando a Mongo:', err));
 
-// --- DEFINICIÓN DEL ESQUEMA (MODELO DE DATOS) ---
 const ShopSchema = new mongoose.Schema({
     slug: { type: String, required: true, unique: true, index: true },
     credentials: {
@@ -58,9 +50,11 @@ const ShopSchema = new mongoose.Schema({
         validUntil: Date,
         startDate: { type: Date, default: Date.now }
     },
+    // CORRECCIÓN: stats ahora incluye lastReset para control diario
     stats: { 
         visits: { type: Number, default: 0 }, 
-        orders: { type: Number, default: 0 } 
+        orders: { type: Number, default: 0 },
+        lastReset: { type: String, default: '' } // Formato YYYY-MM-DD
     },
     config: {
         name: String, 
@@ -90,67 +84,73 @@ const ShopSchema = new mongoose.Schema({
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
-// --- MIDDLEWARES ---
-app.use(cors()); // CORS para rutas HTTP normales
+app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-
-// Servir archivos estáticos: Intenta 'public' primero, luego la raíz (para desarrollo local fácil)
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-// --- SOCKET.IO EVENTS (TIEMPO REAL) ---
+// --- HELPERS STATS DIARIOS ---
+// Función para reiniciar stats si cambió el día
+const checkDailyReset = (shop) => {
+    const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD (Zona local del servidor)
+    if (shop.stats.lastReset !== today) {
+        shop.stats.visits = 0;
+        shop.stats.orders = 0;
+        shop.stats.lastReset = today;
+        return true; // Hubo reset
+    }
+    return false;
+};
+
+// --- SOCKET.IO EVENTS ---
 io.on('connection', (socket) => {
     console.log(`🔌 Nuevo cliente conectado: ${socket.id}`);
 
     socket.on('join-store', (slug) => { 
         socket.join(slug); 
-        console.log(`socket ${socket.id} se unió a la sala: ${slug}`);
     });
     
-    // Nueva Visita
+    // Nueva Visita (Lógica corregida para "Hoy")
     socket.on('register-visit', async (slug) => {
-        console.log(`👀 Nueva visita en: ${slug}`);
         try {
-            const shop = await Shop.findOneAndUpdate(
-                { slug }, 
-                { $inc: { 'stats.visits': 1 } }, 
-                { new: true, fields: 'stats' }
-            );
-            if (shop) io.to(slug).emit('stats-update', shop.stats);
+            let shop = await Shop.findOne({ slug });
+            if (shop) {
+                checkDailyReset(shop); // Resetea si es nuevo día
+                shop.stats.visits += 1;
+                await shop.save();
+                io.to(slug).emit('stats-update', shop.stats);
+            }
         } catch (e) { console.error("Error stats visit:", e); }
     });
 
-    // Nuevo Pedido
+    // Nuevo Pedido (Lógica corregida para "Hoy")
     socket.on('register-order', async (slug) => {
-        console.log(`📦 Nuevo pedido en: ${slug}`);
         try {
-            const shop = await Shop.findOneAndUpdate(
-                { slug }, 
-                { $inc: { 'stats.orders': 1 } }, 
-                { new: true, fields: 'stats' }
-            );
+            let shop = await Shop.findOne({ slug });
             if (shop) {
+                checkDailyReset(shop);
+                shop.stats.orders += 1;
+                await shop.save();
                 io.to(slug).emit('stats-update', shop.stats);
                 io.to(slug).emit('order-notification', { message: '¡Nuevo Pedido!' });
             }
         } catch (e) { console.error("Error stats order:", e); }
     });
 
-    socket.on('disconnect', () => {
-        console.log('Cliente desconectado');
-    });
+    socket.on('disconnect', () => {});
 });
 
-// --- HELPERS ---
+// --- HELPERS TEMPLATE ---
 const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, businessType) => {
     const trialEnds = new Date();
     trialEnds.setDate(trialEnds.getDate() + 15);
+    const today = new Date().toLocaleDateString('en-CA');
 
     return {
         slug,
         credentials: { password, ownerName: owner, contactPhone: phone },
         subscription: { status: 'trial', plan: 'free', validUntil: trialEnds },
-        stats: { visits: 0, orders: 0 },
+        stats: { visits: 0, orders: 0, lastReset: today },
         config: {
             name, address, whatsapp, businessType,
             heroImage: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=1000",
@@ -163,7 +163,6 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
     };
 };
 
-// --- UTILIDADES MAPAS ---
 const resolveGoogleMapsLink = (url) => {
     return new Promise((resolve) => {
         if (!url.includes('goo.gl') && !url.includes('maps.app')) return resolve(url);
@@ -223,31 +222,20 @@ app.get('/api/subscription-success', async (req, res) => {
     res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
-// --- RUTAS API DEL SISTEMA ---
+// --- RUTAS API ---
 
-// REGISTRO
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
-    console.log(`[REGISTER] Intento: ${slug}`);
-    
     if (!slug || !restaurantName || !password) return res.status(400).json({ error: "Datos incompletos" });
-    
     try {
         const existing = await Shop.findOne({ slug });
         if (existing) return res.status(400).json({ error: "Ese nombre de tienda ya existe." });
-
         const newShopData = getTemplateShop(slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType);
         await Shop.create(newShopData);
-        
-        console.log(`[REGISTER] Creado: ${slug}`);
         res.json({ success: true });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error interno" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error interno" }); }
 });
 
-// LOGIN (Simple Check)
 app.post('/api/login', async (req, res) => {
     const { slug, password } = req.body;
     try {
@@ -257,77 +245,51 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error" }); }
 });
 
-// GET TIENDA (PÚBLICO)
 app.get('/api/shop/:slug', async (req, res) => {
     try {
         const shop = await Shop.findOne({ slug: req.params.slug }).lean();
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
-
         const now = new Date();
         let isExpired = false;
         if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
             isExpired = true;
             Shop.updateOne({ _id: shop._id }, { 'subscription.status': 'expired' }).exec();
-        } else if (shop.subscription.status === 'expired') {
-            isExpired = true;
-        }
-
+        } else if (shop.subscription.status === 'expired') isExpired = true;
         delete shop.credentials;
         shop.isExpired = isExpired;
-
         res.json(shop);
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error servidor" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error servidor" }); }
 });
 
-// ADMIN GET (CON LOGIN)
 app.post('/api/admin/get', async (req, res) => {
     const { slug, password } = req.body;
     try {
         const shop = await Shop.findOne({ slug });
-        
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
         if (shop.credentials.password !== password) return res.status(401).json({ error: "Contraseña incorrecta" });
-
-        const now = new Date();
-        if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
-            shop.subscription.status = 'expired';
-            await shop.save();
-        }
+        
+        // Check Daily Reset on Admin Load too
+        if (checkDailyReset(shop)) await shop.save();
 
         res.json(shop);
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error interno" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error interno" }); }
 });
 
-// GUARDAR CAMBIOS (ADMIN)
 app.post('/api/shop/:slug', async (req, res) => {
     const { slug } = req.params;
     const { password, data } = req.body;
-    
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "No encontrado" });
         if (shop.credentials.password !== password) return res.status(403).json({ error: "No autorizado" });
-
         shop.config = data.config;
         shop.menu = data.menu;
-        
         await shop.save();
-        
         io.to(slug).emit('shop-updated', { message: 'Datos actualizados' });
         res.json({ success: true });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error al guardar" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error al guardar" }); }
 });
 
-// UTILIDAD MAPAS
 app.post('/api/utils/parse-map', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Entrada vacía" });
@@ -344,7 +306,6 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// RUTAS VISTAS
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });

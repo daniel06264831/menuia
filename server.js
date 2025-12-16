@@ -68,6 +68,12 @@ const ShopSchema = new mongoose.Schema({
         heroImage: String,
         coords: { lat: Number, lng: Number },
         hours: { open: Number, close: Number },
+        
+        // --- NUEVOS CAMPOS ALTA DEMANDA ---
+        highDemand: { type: Boolean, default: false },
+        highDemandTime: String,
+        // ----------------------------------
+
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
         bank: { name: String, clabe: String, owner: String },
         categoryTitles: { 
@@ -88,7 +94,7 @@ const ShopSchema = new mongoose.Schema({
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
-// NUEVO: Schema para Pedidos (Historial)
+// Schema para Pedidos (Historial)
 const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
     ref: String, // Mesa # o Nombre Cliente
@@ -138,7 +144,7 @@ io.on('connection', (socket) => {
         } catch (e) { console.error("Error stats visit:", e); }
     });
 
-    // MODIFICADO: Ahora recibe payload completo { slug, order } o solo slug (compatibilidad)
+    // Registrar Pedido (Guarda en DB y Notifica)
     socket.on('register-order', async (payload) => {
         let slug = payload;
         let orderData = null;
@@ -156,7 +162,7 @@ io.on('connection', (socket) => {
                 shop.stats.orders += 1;
                 await shop.save();
 
-                // NUEVO: Guardar en Base de Datos si hay datos de orden
+                // Guardar en Base de Datos si hay datos de orden
                 if (orderData) {
                     await Order.create({
                         shopSlug: slug,
@@ -198,7 +204,9 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
             coords: { "lat": 20.648325, "lng": -103.267706 },
             hours: { "open": 9, "close": 23 },
             shipping: { "freeThreshold": 500, "freeKm": 2.0, "maxRadius": 5.0, "costPerKm": 10 },
-            bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name }
+            bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name },
+            highDemand: false, // Default
+            highDemandTime: "" // Default
         },
         menu: { promos: [], especiales: [], clasicos: [], extras: [], groups: [] }
     };
@@ -355,7 +363,7 @@ app.post('/api/orders/list', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
 
-        // Traer últimos 50 pedidos, del más nuevo al más viejo
+        // Traer últimos 100 pedidos, del más nuevo al más viejo
         const orders = await Order.find({ shopSlug: slug }).sort({ createdAt: -1 }).limit(100);
         res.json({ success: true, orders });
     } catch (e) { res.status(500).json({ error: "Error obteniendo pedidos" }); }
@@ -405,5 +413,6 @@ app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landin
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); });
+app.get('/cocina', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'kitchen.html')); });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

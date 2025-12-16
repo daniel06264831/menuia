@@ -28,6 +28,9 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
+// CLAVE MAESTRA PARA EL SUPER ADMIN
+const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
+
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
@@ -45,7 +48,7 @@ const ShopSchema = new mongoose.Schema({
         contactPhone: String
     },
     subscription: { 
-        status: { type: String, default: 'trial' }, 
+        status: { type: String, default: 'trial' }, // trial, active, expired
         plan: { type: String, default: 'free' }, 
         validUntil: Date,
         startDate: { type: Date, default: Date.now }
@@ -222,7 +225,7 @@ app.get('/api/subscription-success', async (req, res) => {
     res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
-// --- RUTAS API ---
+// --- RUTAS API STANDARD ---
 
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
@@ -306,8 +309,55 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
+// --- RUTAS SUPER ADMIN (NUEVAS) ---
+
+// 1. Listar todas las tiendas (Requiere Master Password)
+app.post('/api/superadmin/list', async (req, res) => {
+    const { masterKey } = req.body;
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+
+    try {
+        // Traemos solo los campos necesarios para la tabla
+        const shops = await Shop.find({}, 'slug config.name config.businessType stats subscription updatedAt createdAt credentials.contactPhone').sort({ createdAt: -1 });
+        res.json({ success: true, shops });
+    } catch (e) {
+        res.status(500).json({ error: "Error interno" });
+    }
+});
+
+// 2. Aprobar Pago Manualmente (Requiere Master Password)
+app.post('/api/superadmin/approve-payment', async (req, res) => {
+    const { masterKey, slug, months } = req.body;
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
+
+        const now = new Date();
+        // Si ya tiene una fecha válida futura, sumamos a esa fecha. Si no, empezamos desde hoy.
+        let startDate = (shop.subscription.validUntil && new Date(shop.subscription.validUntil) > now) 
+            ? new Date(shop.subscription.validUntil) 
+            : now;
+
+        // Sumar meses
+        startDate.setMonth(startDate.getMonth() + parseInt(months));
+
+        shop.subscription.status = 'active';
+        shop.subscription.plan = 'pro_manual';
+        shop.subscription.validUntil = startDate;
+
+        await shop.save();
+        res.json({ success: true, validUntil: startDate });
+    } catch (e) {
+        res.status(500).json({ error: "Error al activar" });
+    }
+});
+
+
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
+app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); }); // Nueva ruta
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

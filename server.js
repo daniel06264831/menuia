@@ -97,11 +97,12 @@ const Shop = mongoose.model('Shop', ShopSchema);
 // 2. Schema Pedidos (Historial)
 const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
-    ref: String, // Mesa # o Nombre Cliente
+    ref: String, // Mesa # o Nombre Cliente / Telefono
+    customerPhone: String, // Identificador para notificaciones
     type: String, // 'mesa' o 'llevar'
     items: [mongoose.Schema.Types.Mixed], 
     total: String, 
-    status: { type: String, default: 'pending' }, 
+    status: { type: String, default: 'pending' }, // pending, preparing, ready, delivering, completed
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -173,17 +174,23 @@ io.on('connection', (socket) => {
                 shop.stats.orders += 1;
                 await shop.save();
 
+                let newOrder = null;
                 if (orderData) {
-                    await Order.create({
+                    newOrder = await Order.create({
                         shopSlug: slug,
                         ref: orderData.ref,
-                        type: orderData.type,
+                        customerPhone: orderData.customerPhone, // Guardamos el telefono para notificar
+                        type: orderData.type || 'llevar',
                         items: orderData.items,
                         total: orderData.total,
                         status: orderData.status || 'pending',
                         createdAt: new Date()
                     });
                     io.to(slug).emit('new-order-saved');
+                    
+                    // Notificar al cliente específico si hay un socket/room para él, 
+                    // o emitir evento general que el cliente filtra por ID/Teléfono
+                    io.to(slug).emit('order-created-client', newOrder);
                 }
 
                 io.to(slug).emit('stats-update', shop.stats);
@@ -435,6 +442,10 @@ app.post('/api/orders/update-status', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
         await Order.findByIdAndUpdate(orderId, { status });
+        
+        // EMITIR EVENTO AL CLIENTE
+        io.to(slug).emit('order-status-updated', { orderId, status });
+        
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
 });

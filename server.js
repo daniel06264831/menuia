@@ -42,6 +42,7 @@ mongoose.connect(MONGO_URI)
 
 // --- SCHEMAS ---
 
+// 1. Schema Tienda (Dueños)
 const ShopSchema = new mongoose.Schema({
     slug: { type: String, required: true, unique: true, index: true },
     credentials: {
@@ -69,10 +70,9 @@ const ShopSchema = new mongoose.Schema({
         coords: { lat: Number, lng: Number },
         hours: { open: Number, close: Number },
         
-        // --- NUEVOS CAMPOS ALTA DEMANDA ---
+        // Alta Demanda
         highDemand: { type: Boolean, default: false },
         highDemandTime: String,
-        // ----------------------------------
 
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
         bank: { name: String, clabe: String, owner: String },
@@ -94,18 +94,30 @@ const ShopSchema = new mongoose.Schema({
 
 const Shop = mongoose.model('Shop', ShopSchema);
 
-// Schema para Pedidos (Historial)
+// 2. Schema Pedidos (Historial)
 const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
     ref: String, // Mesa # o Nombre Cliente
     type: String, // 'mesa' o 'llevar'
-    items: [mongoose.Schema.Types.Mixed], // Array de items con qty, price, options
-    total: String, // Guardamos el total formateado o numérico
-    status: { type: String, default: 'pending' }, // pending, completed, cancelled
+    items: [mongoose.Schema.Types.Mixed], 
+    total: String, 
+    status: { type: String, default: 'pending' }, 
     createdAt: { type: Date, default: Date.now }
 });
 
 const Order = mongoose.model('Order', OrderSchema);
+
+// 3. Schema Clientes (Usuarios Finales) - NUEVO
+const CustomerSchema = new mongoose.Schema({
+    phone: { type: String, required: true, unique: true }, // El teléfono es el ID principal
+    name: { type: String, required: true },
+    password: { type: String, required: true }, // En producción, esto debería estar encriptado (hash)
+    address: String,
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Customer = mongoose.model('Customer', CustomerSchema);
+
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
@@ -201,8 +213,8 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
             hours: { "open": 9, "close": 23 },
             shipping: { "freeThreshold": 500, "freeKm": 2.0, "maxRadius": 5.0, "costPerKm": 10 },
             bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name },
-            highDemand: false, // Default
-            highDemandTime: "" // Default
+            highDemand: false,
+            highDemandTime: ""
         },
         menu: { promos: [], especiales: [], clasicos: [], extras: [], groups: [] }
     };
@@ -267,7 +279,7 @@ app.get('/api/subscription-success', async (req, res) => {
     res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
 });
 
-// --- RUTAS API ---
+// --- RUTAS API TIENDAS (Dueños) ---
 
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
@@ -350,7 +362,62 @@ app.post('/api/utils/parse-map', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-// --- RUTAS NUEVAS PARA PEDIDOS (ORDERS) ---
+
+// --- RUTAS NUEVAS: CLIENTES (USUARIOS FINALES) ---
+
+// Registro de Cliente
+app.post('/api/customer/register', async (req, res) => {
+    const { name, phone, password, address } = req.body;
+    if (!name || !phone || !password) {
+        return res.status(400).json({ error: "Faltan datos requeridos" });
+    }
+    
+    try {
+        const existing = await Customer.findOne({ phone });
+        if (existing) {
+            return res.status(400).json({ error: "Este número ya está registrado. Intenta iniciar sesión." });
+        }
+
+        const customer = await Customer.create({ 
+            name, 
+            phone, 
+            password, 
+            address: address || "" 
+        });
+
+        res.json({ 
+            success: true, 
+            customer: { name: customer.name, phone: customer.phone, address: customer.address } 
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error al registrar cliente" });
+    }
+});
+
+// Login de Cliente
+app.post('/api/customer/login', async (req, res) => {
+    const { phone, password } = req.body;
+    if (!phone || !password) return res.status(400).json({ error: "Faltan datos" });
+
+    try {
+        const customer = await Customer.findOne({ phone });
+        if (customer && customer.password === password) {
+            res.json({ 
+                success: true, 
+                customer: { name: customer.name, phone: customer.phone, address: customer.address } 
+            });
+        } else {
+            res.status(401).json({ error: "Credenciales inválidas" });
+        }
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error en el servidor" });
+    }
+});
+
+
+// --- RUTAS PEDIDOS (ORDERS) ---
 
 app.post('/api/orders/list', async (req, res) => {
     const { slug, password } = req.body;
@@ -372,10 +439,9 @@ app.post('/api/orders/update-status', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
 });
 
-// --- RUTAS MARKETPLACE PUBLICO (NUEVO) ---
+// --- RUTAS MARKETPLACE PUBLICO ---
 app.get('/api/shops/public', async (req, res) => {
     try {
-        // Solo traemos datos públicos seguros
         const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand').lean();
         res.json({ success: true, shops });
     } catch (e) {
@@ -411,12 +477,12 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al activar" }); }
 });
 
-app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); // CAMBIO: HOME ES AHORA MARKETPLACE
-app.get('/register', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); }); // Antigua Landing
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); 
+app.get('/register', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); });
 app.get('/cocina', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'kitchen.html')); });
-app.get('/marketplace', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); // Nueva ruta
+app.get('/marketplace', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

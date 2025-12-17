@@ -149,7 +149,6 @@ io.on('connection', (socket) => {
         let slug = payload;
         let orderData = null;
 
-        // Si el payload es un objeto con la orden, lo extraemos
         if (typeof payload === 'object' && payload.slug) {
             slug = payload.slug;
             orderData = payload.order;
@@ -162,7 +161,6 @@ io.on('connection', (socket) => {
                 shop.stats.orders += 1;
                 await shop.save();
 
-                // Guardar en Base de Datos si hay datos de orden
                 if (orderData) {
                     await Order.create({
                         shopSlug: slug,
@@ -173,8 +171,6 @@ io.on('connection', (socket) => {
                         status: orderData.status || 'pending',
                         createdAt: new Date()
                     });
-                    
-                    // Notificar al panel admin para que refresque la tabla
                     io.to(slug).emit('new-order-saved');
                 }
 
@@ -356,29 +352,35 @@ app.post('/api/utils/parse-map', async (req, res) => {
 
 // --- RUTAS NUEVAS PARA PEDIDOS (ORDERS) ---
 
-// Obtener lista de pedidos
 app.post('/api/orders/list', async (req, res) => {
     const { slug, password } = req.body;
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
-
-        // Traer últimos 100 pedidos, del más nuevo al más viejo
         const orders = await Order.find({ shopSlug: slug }).sort({ createdAt: -1 }).limit(100);
         res.json({ success: true, orders });
     } catch (e) { res.status(500).json({ error: "Error obteniendo pedidos" }); }
 });
 
-// Actualizar estado del pedido (Pendiente -> Completado)
 app.post('/api/orders/update-status', async (req, res) => {
     const { slug, password, orderId, status } = req.body;
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
-
         await Order.findByIdAndUpdate(orderId, { status });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
+});
+
+// --- RUTAS MARKETPLACE PUBLICO (NUEVO) ---
+app.get('/api/shops/public', async (req, res) => {
+    try {
+        // Solo traemos datos públicos seguros
+        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand').lean();
+        res.json({ success: true, shops });
+    } catch (e) {
+        res.status(500).json({ error: "Error al obtener tiendas" });
+    }
 });
 
 // --- RUTAS SUPER ADMIN ---
@@ -409,10 +411,12 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al activar" }); }
 });
 
-app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); // CAMBIO: HOME ES AHORA MARKETPLACE
+app.get('/register', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); }); // Antigua Landing
 app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); });
 app.get('/cocina', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'kitchen.html')); });
+app.get('/marketplace', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); // Nueva ruta
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

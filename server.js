@@ -97,8 +97,11 @@ const Shop = mongoose.model('Shop', ShopSchema);
 // 2. Schema Pedidos (Historial)
 const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
-    ref: String, // Mesa # o Nombre Cliente / Telefono
+    dailyId: { type: Number, default: 0 }, // ID Secuencial diario (1, 2, 3...)
+    ref: String, // Mesa # o Nombre Cliente
     customerPhone: String, // Identificador para notificaciones
+    address: String, // Dirección de entrega
+    paymentMethod: String, // Efectivo o Transferencia
     type: String, // 'mesa' o 'llevar'
     items: [mongoose.Schema.Types.Mixed], 
     total: String, 
@@ -176,20 +179,31 @@ io.on('connection', (socket) => {
 
                 let newOrder = null;
                 if (orderData) {
+                    // Calcular dailyId (Secuencia diaria)
+                    const startOfDay = new Date();
+                    startOfDay.setHours(0,0,0,0);
+                    
+                    const countToday = await Order.countDocuments({
+                        shopSlug: slug,
+                        createdAt: { $gte: startOfDay }
+                    });
+
                     newOrder = await Order.create({
                         shopSlug: slug,
+                        dailyId: countToday + 1, // Secuencia: 1, 2, 3...
                         ref: orderData.ref,
-                        customerPhone: orderData.customerPhone, // Guardamos el telefono para notificar
+                        customerPhone: orderData.customerPhone,
+                        address: orderData.address,
+                        paymentMethod: orderData.paymentMethod,
                         type: orderData.type || 'llevar',
                         items: orderData.items,
                         total: orderData.total,
                         status: orderData.status || 'pending',
                         createdAt: new Date()
                     });
-                    io.to(slug).emit('new-order-saved');
                     
-                    // Notificar al cliente específico si hay un socket/room para él, 
-                    // o emitir evento general que el cliente filtra por ID/Teléfono
+                    io.to(slug).emit('new-order-saved');
+                    // Notificar al cliente específico
                     io.to(slug).emit('order-created-client', newOrder);
                 }
 

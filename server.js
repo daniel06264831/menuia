@@ -249,6 +249,26 @@ const resolveGoogleMapsLink = (url) => {
     });
 };
 
+// NUEVA FUNCIÓN: Geocodificación Inversa (Coordenadas -> Dirección)
+const reverseGeocode = (lat, lng) => {
+    return new Promise((resolve, reject) => {
+        // Usamos zoom=18 para obtener detalle de calle/número
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+        https.get(url, { headers: { 'User-Agent': 'MiPlataforma/1.0' } }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                try { 
+                    const json = JSON.parse(data); 
+                    // Devolvemos display_name que es la dirección completa
+                    if (json && json.display_name) resolve(json.display_name); 
+                    else resolve(null); 
+                } catch (e) { reject(e); }
+            });
+        }).on('error', reject);
+    });
+};
+
 // CORRECCIÓN: Ahora devuelve también la dirección (display_name)
 const geocodeAddress = (address) => {
     return new Promise((resolve, reject) => {
@@ -389,21 +409,33 @@ app.post('/api/utils/parse-map', async (req, res) => {
             const regex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
             const match = finalUrl.match(regex);
             
-            // Intentar extraer dirección del URL si existe (/place/Direccion+Bonita/...)
-            let address = "";
-            if (finalUrl.includes('/place/')) {
-                try {
-                    const parts = finalUrl.split('/place/')[1].split('/')[0];
-                    address = decodeURIComponent(parts).replace(/\+/g, ' ');
-                } catch(e) { }
-            }
-
             if (match) {
+                const lat = parseFloat(match[1]);
+                const lng = parseFloat(match[2]);
+                let address = "";
+
+                // MEJORA: Obtener la dirección real usando las coordenadas (Reverse Geocoding)
+                // Esto es mucho más preciso que intentar leer el texto del link
+                try {
+                    const realAddress = await reverseGeocode(lat, lng);
+                    if (realAddress) {
+                        address = realAddress;
+                    } else {
+                        // Fallback: Intentar extraer del URL si falla el servicio
+                        if (finalUrl.includes('/place/')) {
+                            const parts = finalUrl.split('/place/')[1].split('/')[0];
+                            address = decodeURIComponent(parts).replace(/\+/g, ' ');
+                        }
+                    }
+                } catch (e) {
+                    console.log("Error en reverse geocoding, usando fallback URL");
+                }
+
                 return res.json({ 
                     success: true, 
-                    lat: parseFloat(match[1]), 
-                    lng: parseFloat(match[2]),
-                    address: address || undefined // Enviar address si se encontró
+                    lat: lat, 
+                    lng: lng,
+                    address: address || undefined // Enviar address encontrada
                 });
             }
         }

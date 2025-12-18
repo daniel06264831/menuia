@@ -75,7 +75,8 @@ const ShopSchema = new mongoose.Schema({
         highDemandTime: String,
 
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
-        bank: { name: String, clabe: String, owner: String },
+        bank: { name: String, clabe: String, owner: String }, // <-- NUEVOS DATOS
+        bankDetails: { name: String, clabe: String, owner: String }, // BACKUP COMPATIBILIDAD
         categoryTitles: { 
             promos: { type: String, default: "🔥 Promociones" }, 
             especiales: { type: String, default: "⭐ Recomendados" }, 
@@ -248,6 +249,7 @@ const resolveGoogleMapsLink = (url) => {
     });
 };
 
+// CORRECCIÓN: Ahora devuelve también la dirección (display_name)
 const geocodeAddress = (address) => {
     return new Promise((resolve, reject) => {
         const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
@@ -255,7 +257,16 @@ const geocodeAddress = (address) => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
-                try { const json = JSON.parse(data); if (json && json.length > 0) resolve({ lat: parseFloat(json[0].lat), lng: parseFloat(json[0].lon) }); else resolve(null); } catch (e) { reject(e); }
+                try { 
+                    const json = JSON.parse(data); 
+                    if (json && json.length > 0) {
+                        resolve({ 
+                            lat: parseFloat(json[0].lat), 
+                            lng: parseFloat(json[0].lon),
+                            address: json[0].display_name // <--- AÑADIDO PARA DEVOLVER DIRECCIÓN
+                        }); 
+                    } else resolve(null); 
+                } catch (e) { reject(e); }
             });
         }).on('error', reject);
     });
@@ -367,18 +378,47 @@ app.post('/api/shop/:slug', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al guardar" }); }
 });
 
+// CORRECCIÓN: LÓGICA DE EXTRACCIÓN DE DIRECCIÓN
 app.post('/api/utils/parse-map', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Entrada vacía" });
     try {
-        if (input.includes('http') || input.includes('goo.gl') || input.includes('maps.app')) {
+        // CASO 1: LINK DE GOOGLE MAPS
+        if (input.includes('http') || input.includes('goo.gl') || input.includes('maps.app') || input.includes('google.com/maps')) {
             const finalUrl = await resolveGoogleMapsLink(input);
             const regex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
             const match = finalUrl.match(regex);
-            if (match) return res.json({ success: true, lat: parseFloat(match[1]), lng: parseFloat(match[2]) });
+            
+            // Intentar extraer dirección del URL si existe (/place/Direccion+Bonita/...)
+            let address = "";
+            if (finalUrl.includes('/place/')) {
+                try {
+                    const parts = finalUrl.split('/place/')[1].split('/')[0];
+                    address = decodeURIComponent(parts).replace(/\+/g, ' ');
+                } catch(e) { }
+            }
+
+            if (match) {
+                return res.json({ 
+                    success: true, 
+                    lat: parseFloat(match[1]), 
+                    lng: parseFloat(match[2]),
+                    address: address || undefined // Enviar address si se encontró
+                });
+            }
         }
+
+        // CASO 2: GEOCODIFICACIÓN POR TEXTO (NOMINATIM)
         const coords = await geocodeAddress(input);
-        if (coords) return res.json({ success: true, lat: coords.lat, lng: coords.lng });
+        if (coords) {
+            return res.json({ 
+                success: true, 
+                lat: coords.lat, 
+                lng: coords.lng,
+                address: coords.address // Enviar la dirección formateada que encontró Nominatim
+            });
+        }
+
         res.status(400).json({ error: "No se encontraron coordenadas." });
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });

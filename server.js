@@ -474,7 +474,7 @@ app.post('/api/orders/update-status', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
 });
 
-// NUEVO: Resumen Financiero Server-Side
+// NUEVO: Endpoint de Finanzas y Analíticas
 app.post('/api/analytics/summary', async (req, res) => {
     const { slug, password } = req.body;
     try {
@@ -485,8 +485,7 @@ app.post('/api/analytics/summary', async (req, res) => {
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        // Obtenemos todos los pedidos del mes para calcular con precisión
-        // Esto es mejor que usar .limit(100) en el cliente
+        // Buscar pedidos del mes (excluyendo cancelados si los hubiera)
         const monthlyOrders = await Order.find({ 
             shopSlug: slug, 
             createdAt: { $gte: startOfMonth } 
@@ -495,9 +494,15 @@ app.post('/api/analytics/summary', async (req, res) => {
         let salesToday = 0;
         let salesMonth = 0;
         
+        // Historial últimos 7 días para gráfica
+        const last7Days = {};
+        for(let i=6; i>=0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            last7Days[d.toLocaleDateString('en-US', {weekday: 'short'})] = 0;
+        }
+
         monthlyOrders.forEach(o => {
-            if(o.status === 'cancelled') return; // Ignorar cancelados si existieran
-            
             // Limpiar string de dinero "$150.00" -> 150.00
             let val = 0;
             if(typeof o.total === 'string') {
@@ -505,21 +510,31 @@ app.post('/api/analytics/summary', async (req, res) => {
             } else if (typeof o.total === 'number') {
                 val = o.total;
             }
-            
             if(isNaN(val)) val = 0;
             
             salesMonth += val;
             if(o.createdAt >= startOfDay) salesToday += val;
+
+            // Datos gráfica
+            const dayKey = new Date(o.createdAt).toLocaleDateString('en-US', {weekday: 'short'});
+            if (last7Days[dayKey] !== undefined) {
+                last7Days[dayKey] += val;
+            }
         });
 
-        res.json({ success: true, salesToday, salesMonth, orderCountMonth: monthlyOrders.length });
+        res.json({ 
+            success: true, 
+            salesToday, 
+            salesMonth, 
+            orderCountMonth: monthlyOrders.length,
+            chartData: last7Days
+        });
 
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: "Error calculando finanzas" });
     }
 });
-
 
 // --- RUTAS MARKETPLACE PUBLICO ---
 app.get('/api/shops/public', async (req, res) => {

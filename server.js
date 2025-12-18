@@ -31,7 +31,10 @@ const PORT = process.env.PORT || 3000;
 // CLAVE MAESTRA PARA EL SUPER ADMIN
 const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
+// CLAVES API
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyAAmnvtdj0ks-cJpDuM3UiZord1NOoNiLE"; // <--- TU CLAVE AGREGADA AQUÍ
+
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
 const stripe = require('stripe')(STRIPE_KEY);
@@ -75,8 +78,8 @@ const ShopSchema = new mongoose.Schema({
         highDemandTime: String,
 
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
-        bank: { name: String, clabe: String, owner: String }, // <-- NUEVOS DATOS
-        bankDetails: { name: String, clabe: String, owner: String }, // BACKUP COMPATIBILIDAD
+        bank: { name: String, clabe: String, owner: String },
+        bankDetails: { name: String, clabe: String, owner: String },
         categoryTitles: { 
             promos: { type: String, default: "🔥 Promociones" }, 
             especiales: { type: String, default: "⭐ Recomendados" }, 
@@ -98,25 +101,25 @@ const Shop = mongoose.model('Shop', ShopSchema);
 // 2. Schema Pedidos (Historial)
 const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
-    dailyId: { type: Number, default: 0 }, // ID Secuencial diario (1, 2, 3...)
-    ref: String, // Mesa # o Nombre Cliente
-    customerPhone: String, // Identificador para notificaciones
-    address: String, // Dirección de entrega
-    paymentMethod: String, // Efectivo o Transferencia
-    type: String, // 'mesa' o 'llevar'
+    dailyId: { type: Number, default: 0 },
+    ref: String,
+    customerPhone: String,
+    address: String,
+    paymentMethod: String,
+    type: String,
     items: [mongoose.Schema.Types.Mixed], 
     total: String, 
-    status: { type: String, default: 'pending' }, // pending, preparing, ready, delivering, completed
+    status: { type: String, default: 'pending' },
     createdAt: { type: Date, default: Date.now }
 });
 
 const Order = mongoose.model('Order', OrderSchema);
 
-// 3. Schema Clientes (Usuarios Finales) - NUEVO
+// 3. Schema Clientes (Usuarios Finales)
 const CustomerSchema = new mongoose.Schema({
-    phone: { type: String, required: true, unique: true }, // El teléfono es el ID principal
+    phone: { type: String, required: true, unique: true },
     name: { type: String, required: true },
-    password: { type: String, required: true }, // En producción, esto debería estar encriptado (hash)
+    password: { type: String, required: true },
     address: String,
     createdAt: { type: Date, default: Date.now }
 });
@@ -161,7 +164,6 @@ io.on('connection', (socket) => {
         } catch (e) { console.error("Error stats visit:", e); }
     });
 
-    // Registrar Pedido (Guarda en DB y Notifica)
     socket.on('register-order', async (payload) => {
         let slug = payload;
         let orderData = null;
@@ -180,7 +182,6 @@ io.on('connection', (socket) => {
 
                 let newOrder = null;
                 if (orderData) {
-                    // Calcular dailyId (Secuencia diaria)
                     const startOfDay = new Date();
                     startOfDay.setHours(0,0,0,0);
                     
@@ -191,7 +192,7 @@ io.on('connection', (socket) => {
 
                     newOrder = await Order.create({
                         shopSlug: slug,
-                        dailyId: countToday + 1, // Secuencia: 1, 2, 3...
+                        dailyId: countToday + 1,
                         ref: orderData.ref,
                         customerPhone: orderData.customerPhone,
                         address: orderData.address,
@@ -204,7 +205,6 @@ io.on('connection', (socket) => {
                     });
                     
                     io.to(slug).emit('new-order-saved');
-                    // Notificar al cliente específico
                     io.to(slug).emit('order-created-client', newOrder);
                 }
 
@@ -215,6 +215,63 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {});
+});
+
+// --- API IA (GOOGLE GEMINI) ---
+app.post('/api/ai/generate', async (req, res) => {
+    const { task, context } = req.body;
+    
+    // Construcción del Prompt según la tarea
+    let prompt = "";
+    if (task === 'product_description') {
+        prompt = `Eres un experto copywriter gastronómico. Escribe una descripción corta, apetitosa y atractiva (máximo 30 palabras) para un producto llamado "${context.productName}". Usa emojis relevantes.`;
+    } else if (task === 'business_insight') {
+        prompt = `Actúa como un consultor de negocios experto. Analiza estas estadísticas breves: ${JSON.stringify(context.stats)} para un negocio de tipo "${context.businessType}". Dame UN solo consejo estratégico, breve y accionable (máximo 20 palabras) para mejorar ventas hoy.`;
+    } else if (task === 'social_post') {
+        prompt = `Eres un community manager experto. Escribe un post para redes sociales (Instagram/Facebook) para el negocio "${context.shopName}". El estilo debe ser: ${context.style}. Incluye emojis y hashtags. Máximo 280 caracteres.`;
+    } else if (task === 'optimize_hours') {
+        prompt = `Para un negocio de tipo "${context.businessType}", sugiere un horario de apertura y cierre óptimo basado en estándares de la industria. Responde SOLAMENTE con un objeto JSON válido en este formato exacto, sin markdown ni explicaciones: {"open": 9, "close": 23}`;
+    } else {
+        return res.status(400).json({ error: "Tarea no reconocida" });
+    }
+
+    try {
+        // Llamada a la API REST de Gemini (sin dependencia extra)
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
+            let resultText = data.candidates[0].content.parts[0].text;
+
+            // Procesamiento especial para JSON (Horarios)
+            if (task === 'optimize_hours') {
+                try {
+                    // Limpiar posibles bloques de código Markdown
+                    resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const jsonResult = JSON.parse(resultText);
+                    return res.json({ success: true, result: jsonResult });
+                } catch (e) {
+                    console.error("Error parseando JSON de IA:", e);
+                    return res.json({ success: false, error: "La IA no devolvió un formato válido." });
+                }
+            }
+
+            res.json({ success: true, result: resultText });
+        } else {
+            console.error("Respuesta inesperada de Gemini:", JSON.stringify(data));
+            res.status(500).json({ error: "No se pudo generar el contenido." });
+        }
+    } catch (e) {
+        console.error("Error en servidor IA:", e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // --- HELPERS TEMPLATE ---
@@ -249,10 +306,9 @@ const resolveGoogleMapsLink = (url) => {
     });
 };
 
-// NUEVA FUNCIÓN: Geocodificación Inversa (Coordenadas -> Dirección)
+// Geocodificación Inversa
 const reverseGeocode = (lat, lng) => {
     return new Promise((resolve, reject) => {
-        // Usamos zoom=18 para obtener detalle de calle/número
         const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
         https.get(url, { headers: { 'User-Agent': 'MiPlataforma/1.0' } }, (res) => {
             let data = '';
@@ -260,7 +316,6 @@ const reverseGeocode = (lat, lng) => {
             res.on('end', () => {
                 try { 
                     const json = JSON.parse(data); 
-                    // Devolvemos display_name que es la dirección completa
                     if (json && json.display_name) resolve(json.display_name); 
                     else resolve(null); 
                 } catch (e) { reject(e); }
@@ -269,7 +324,6 @@ const reverseGeocode = (lat, lng) => {
     });
 };
 
-// CORRECCIÓN: Ahora devuelve también la dirección (display_name)
 const geocodeAddress = (address) => {
     return new Promise((resolve, reject) => {
         const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
@@ -283,7 +337,7 @@ const geocodeAddress = (address) => {
                         resolve({ 
                             lat: parseFloat(json[0].lat), 
                             lng: parseFloat(json[0].lon),
-                            address: json[0].display_name // <--- AÑADIDO PARA DEVOLVER DIRECCIÓN
+                            address: json[0].display_name 
                         }); 
                     } else resolve(null); 
                 } catch (e) { reject(e); }
@@ -292,46 +346,7 @@ const geocodeAddress = (address) => {
     });
 };
 
-// --- RUTAS DE PAGO (STRIPE) ---
-app.post('/api/create-subscription', async (req, res) => {
-    const { slug } = req.body;
-    const domain = `${req.protocol}://${req.get('host')}`; 
-    try {
-        const session = await stripe.checkout.sessions.create({
-            mode: 'subscription',
-            payment_method_types: ['card'],
-            line_items: [{ 
-                price_data: { 
-                    currency: 'mxn', 
-                    product_data: { name: 'Plan Menú Digital PRO' }, 
-                    unit_amount: 10000, 
-                    recurring: { interval: 'month' } 
-                }, 
-                quantity: 1 
-            }],
-            success_url: `${domain}/api/subscription-success?slug=${slug}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: 'https://iamenu.github.io/menuia/admin.html?canceled=true',
-        });
-        res.json({ url: session.url });
-    } catch (e) { 
-        console.error("Stripe Error:", e);
-        res.status(500).json({ error: e.message }); 
-    }
-});
-
-app.get('/api/subscription-success', async (req, res) => {
-    const { slug } = req.query;
-    if (slug) {
-        await Shop.findOneAndUpdate({ slug }, {
-            'subscription.status': 'active',
-            'subscription.plan': 'pro_monthly',
-            'subscription.validUntil': null 
-        });
-    }
-    res.redirect('https://iamenu.github.io/menuia/admin.html?success=subscription');
-});
-
-// --- RUTAS API TIENDAS (Dueños) ---
+// --- RUTAS API TIENDAS ---
 
 app.post('/api/register', async (req, res) => {
     const { slug, restaurantName, ownerName, phone, address, whatsapp, password, businessType } = req.body;
@@ -398,12 +413,10 @@ app.post('/api/shop/:slug', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al guardar" }); }
 });
 
-// CORRECCIÓN: LÓGICA DE EXTRACCIÓN DE DIRECCIÓN
 app.post('/api/utils/parse-map', async (req, res) => {
     const { input } = req.body;
     if (!input) return res.status(400).json({ error: "Entrada vacía" });
     try {
-        // CASO 1: LINK DE GOOGLE MAPS
         if (input.includes('http') || input.includes('goo.gl') || input.includes('maps.app') || input.includes('google.com/maps')) {
             const finalUrl = await resolveGoogleMapsLink(input);
             const regex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
@@ -414,105 +427,57 @@ app.post('/api/utils/parse-map', async (req, res) => {
                 const lng = parseFloat(match[2]);
                 let address = "";
 
-                // MEJORA: Obtener la dirección real usando las coordenadas (Reverse Geocoding)
-                // Esto es mucho más preciso que intentar leer el texto del link
                 try {
                     const realAddress = await reverseGeocode(lat, lng);
                     if (realAddress) {
                         address = realAddress;
                     } else {
-                        // Fallback: Intentar extraer del URL si falla el servicio
                         if (finalUrl.includes('/place/')) {
                             const parts = finalUrl.split('/place/')[1].split('/')[0];
                             address = decodeURIComponent(parts).replace(/\+/g, ' ');
                         }
                     }
-                } catch (e) {
-                    console.log("Error en reverse geocoding, usando fallback URL");
-                }
+                } catch (e) { console.log("Error en reverse geocoding"); }
 
-                return res.json({ 
-                    success: true, 
-                    lat: lat, 
-                    lng: lng,
-                    address: address || undefined // Enviar address encontrada
-                });
+                return res.json({ success: true, lat: lat, lng: lng, address: address || undefined });
             }
         }
 
-        // CASO 2: GEOCODIFICACIÓN POR TEXTO (NOMINATIM)
         const coords = await geocodeAddress(input);
         if (coords) {
-            return res.json({ 
-                success: true, 
-                lat: coords.lat, 
-                lng: coords.lng,
-                address: coords.address // Enviar la dirección formateada que encontró Nominatim
-            });
+            return res.json({ success: true, lat: coords.lat, lng: coords.lng, address: coords.address });
         }
 
         res.status(400).json({ error: "No se encontraron coordenadas." });
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
 });
 
-
-// --- RUTAS NUEVAS: CLIENTES (USUARIOS FINALES) ---
-
-// Registro de Cliente
+// --- RUTAS NUEVAS: CLIENTES ---
 app.post('/api/customer/register', async (req, res) => {
     const { name, phone, password, address } = req.body;
-    if (!name || !phone || !password) {
-        return res.status(400).json({ error: "Faltan datos requeridos" });
-    }
-    
+    if (!name || !phone || !password) return res.status(400).json({ error: "Faltan datos requeridos" });
     try {
         const existing = await Customer.findOne({ phone });
-        if (existing) {
-            return res.status(400).json({ error: "Este número ya está registrado. Intenta iniciar sesión." });
-        }
-
-        const customer = await Customer.create({ 
-            name, 
-            phone, 
-            password, 
-            address: address || "" 
-        });
-
-        res.json({ 
-            success: true, 
-            customer: { name: customer.name, phone: customer.phone, address: customer.address } 
-        });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error al registrar cliente" });
-    }
+        if (existing) return res.status(400).json({ error: "Este número ya está registrado." });
+        const customer = await Customer.create({ name, phone, password, address: address || "" });
+        res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address } });
+    } catch (e) { res.status(500).json({ error: "Error al registrar cliente" }); }
 });
 
-// Login de Cliente
 app.post('/api/customer/login', async (req, res) => {
     const { phone, password } = req.body;
     if (!phone || !password) return res.status(400).json({ error: "Faltan datos" });
-
     try {
         const customer = await Customer.findOne({ phone });
         if (customer && customer.password === password) {
-            res.json({ 
-                success: true, 
-                customer: { name: customer.name, phone: customer.phone, address: customer.address } 
-            });
+            res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address } });
         } else {
             res.status(401).json({ error: "Credenciales inválidas" });
         }
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error en el servidor" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error en el servidor" }); }
 });
 
-
-// --- RUTAS PEDIDOS (ORDERS) ---
-
-// MODIFICADO: Acepta limit y filtros de fecha
+// --- RUTAS PEDIDOS ---
 app.post('/api/orders/list', async (req, res) => {
     const { slug, password, limit, startDate, endDate } = req.body;
     try {
@@ -538,15 +503,11 @@ app.post('/api/orders/update-status', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
         await Order.findByIdAndUpdate(orderId, { status });
-        
-        // EMITIR EVENTO AL CLIENTE
         io.to(slug).emit('order-status-updated', { orderId, status });
-        
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
 });
 
-// NUEVO: Endpoint de Finanzas y Analíticas
 app.post('/api/analytics/summary', async (req, res) => {
     const { slug, password } = req.body;
     try {
@@ -557,16 +518,10 @@ app.post('/api/analytics/summary', async (req, res) => {
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        // Buscar pedidos del mes (excluyendo cancelados si los hubiera)
-        const monthlyOrders = await Order.find({ 
-            shopSlug: slug, 
-            createdAt: { $gte: startOfMonth } 
-        }).select('total createdAt status');
+        const monthlyOrders = await Order.find({ shopSlug: slug, createdAt: { $gte: startOfMonth } }).select('total createdAt status');
 
         let salesToday = 0;
         let salesMonth = 0;
-        
-        // Historial últimos 7 días para gráfica
         const last7Days = {};
         for(let i=6; i>=0; i--) {
             const d = new Date();
@@ -575,51 +530,30 @@ app.post('/api/analytics/summary', async (req, res) => {
         }
 
         monthlyOrders.forEach(o => {
-            // Limpiar string de dinero "$150.00" -> 150.00
             let val = 0;
-            if(typeof o.total === 'string') {
-                val = parseFloat(o.total.replace(/[^0-9.-]+/g,""));
-            } else if (typeof o.total === 'number') {
-                val = o.total;
-            }
+            if(typeof o.total === 'string') val = parseFloat(o.total.replace(/[^0-9.-]+/g,""));
+            else if (typeof o.total === 'number') val = o.total;
             if(isNaN(val)) val = 0;
             
             salesMonth += val;
             if(o.createdAt >= startOfDay) salesToday += val;
 
-            // Datos gráfica
             const dayKey = new Date(o.createdAt).toLocaleDateString('en-US', {weekday: 'short'});
-            if (last7Days[dayKey] !== undefined) {
-                last7Days[dayKey] += val;
-            }
+            if (last7Days[dayKey] !== undefined) last7Days[dayKey] += val;
         });
 
-        res.json({ 
-            success: true, 
-            salesToday, 
-            salesMonth, 
-            orderCountMonth: monthlyOrders.length,
-            chartData: last7Days
-        });
-
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Error calculando finanzas" });
-    }
+        res.json({ success: true, salesToday, salesMonth, orderCountMonth: monthlyOrders.length, chartData: last7Days });
+    } catch (e) { res.status(500).json({ error: "Error calculando finanzas" }); }
 });
 
-// --- RUTAS MARKETPLACE PUBLICO ---
 app.get('/api/shops/public', async (req, res) => {
     try {
         const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand').lean();
         res.json({ success: true, shops });
-    } catch (e) {
-        res.status(500).json({ error: "Error al obtener tiendas" });
-    }
+    } catch (e) { res.status(500).json({ error: "Error al obtener tiendas" }); }
 });
 
 // --- RUTAS SUPER ADMIN ---
-
 app.post('/api/superadmin/list', async (req, res) => {
     const { masterKey } = req.body;
     if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });

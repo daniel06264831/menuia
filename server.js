@@ -440,12 +440,22 @@ app.post('/api/customer/login', async (req, res) => {
 
 // --- RUTAS PEDIDOS (ORDERS) ---
 
+// MODIFICADO: Acepta limit y filtros de fecha
 app.post('/api/orders/list', async (req, res) => {
-    const { slug, password } = req.body;
+    const { slug, password, limit, startDate, endDate } = req.body;
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
-        const orders = await Order.find({ shopSlug: slug }).sort({ createdAt: -1 }).limit(100);
+        
+        let query = { shopSlug: slug };
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) query.createdAt.$lte = new Date(endDate);
+        }
+
+        const maxLimit = limit ? parseInt(limit) : 100;
+        const orders = await Order.find(query).sort({ createdAt: -1 }).limit(maxLimit);
         res.json({ success: true, orders });
     } catch (e) { res.status(500).json({ error: "Error obteniendo pedidos" }); }
 });
@@ -463,6 +473,53 @@ app.post('/api/orders/update-status', async (req, res) => {
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error actualizando" }); }
 });
+
+// NUEVO: Resumen Financiero Server-Side
+app.post('/api/analytics/summary', async (req, res) => {
+    const { slug, password } = req.body;
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
+
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        // Obtenemos todos los pedidos del mes para calcular con precisión
+        // Esto es mejor que usar .limit(100) en el cliente
+        const monthlyOrders = await Order.find({ 
+            shopSlug: slug, 
+            createdAt: { $gte: startOfMonth } 
+        }).select('total createdAt status');
+
+        let salesToday = 0;
+        let salesMonth = 0;
+        
+        monthlyOrders.forEach(o => {
+            if(o.status === 'cancelled') return; // Ignorar cancelados si existieran
+            
+            // Limpiar string de dinero "$150.00" -> 150.00
+            let val = 0;
+            if(typeof o.total === 'string') {
+                val = parseFloat(o.total.replace(/[^0-9.-]+/g,""));
+            } else if (typeof o.total === 'number') {
+                val = o.total;
+            }
+            
+            if(isNaN(val)) val = 0;
+            
+            salesMonth += val;
+            if(o.createdAt >= startOfDay) salesToday += val;
+        });
+
+        res.json({ success: true, salesToday, salesMonth, orderCountMonth: monthlyOrders.length });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error calculando finanzas" });
+    }
+});
+
 
 // --- RUTAS MARKETPLACE PUBLICO ---
 app.get('/api/shops/public', async (req, res) => {

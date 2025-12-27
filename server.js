@@ -545,8 +545,33 @@ app.post('/api/utils/search-address', async (req, res) => {
     if (!query || query.length < 3) return res.json({ success: true, results: [] });
 
     try {
-        const results = await fetchNominatim(query, 5);
-        res.json({ success: true, results });
+        // 1. Intento Directo
+        let results = await fetchNominatim(query, 5);
+
+        // 2. Si no hay resultados, intentar limpieza (Misma lógica que geocodeAddress)
+        if (!results || results.length === 0) {
+            let clean = query
+                .replace(/,?\s*Jal\.?/gi, ", Jalisco")
+                .replace(/\b\d{5}\b/g, "")
+                .replace(/Col\.|Colonia/gi, "");
+
+            if (clean !== query) {
+                console.log(`🔎 Autocomplete Retry (Clean): ${clean}`);
+                results = await fetchNominatim(clean, 5);
+            }
+        }
+
+        // 3. Si sigue vacío, intentar super simple (Calle + Ciudad)
+        if (!results || results.length === 0) {
+            const parts = query.split(',').map(p => p.trim());
+            if (parts.length >= 3) {
+                const simple = `${parts[0]}, ${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
+                console.log(`🔎 Autocomplete Retry (Simple): ${simple}`);
+                results = await fetchNominatim(simple, 5);
+            }
+        }
+
+        res.json({ success: true, results: results || [] });
     } catch (e) {
         res.status(500).json({ error: "Error searching" });
     }

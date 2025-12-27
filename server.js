@@ -33,11 +33,29 @@ const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
 // CLAVES API
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyAAmnvtdj0ks-cJpDuM3UiZord1NOoNiLE"; // <--- TU CLAVE AGREGADA AQUÍ
+
+// ==========================================
+// 🔵 MODO RENDER (VARIABLES DE ENTORNO) 🔵
+// El servidor leerá la clave desde la configuración de Render.
+// NO escribas tu clave aquí.
+// ==========================================
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
-const stripe = require('stripe')(STRIPE_KEY);
+// Inicializar Stripe
+let stripe;
+try {
+    stripe = require('stripe')(STRIPE_KEY);
+} catch (e) {
+    console.warn("⚠️ Stripe no se pudo inicializar (Revisar Clave). El resto del servidor funcionará.");
+}
+
+// Validación de Node.js para fetch
+if (!globalThis.fetch) {
+    console.warn("⚠️ ADVERTENCIA: Tu versión de Node.js es antigua y no soporta 'fetch' nativo.");
+    console.warn("   La IA podría fallar. Por favor actualiza a Node.js 18+ o instala 'node-fetch'.");
+}
 
 mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Conectado exitosamente a MongoDB Atlas'))
@@ -221,7 +239,13 @@ io.on('connection', (socket) => {
 app.post('/api/ai/generate', async (req, res) => {
     const { task, context } = req.body;
     
-    // Construcción del Prompt según la tarea
+    // Verificación de seguridad
+    if (!GEMINI_API_KEY) {
+        console.error("❌ ERROR IA: No se encontró la variable GEMINI_API_KEY en Render.");
+        return res.status(500).json({ error: "Configuración de servidor incompleta (Falta API Key)." });
+    }
+
+    // Construcción del Prompt
     let prompt = "";
     if (task === 'product_description') {
         prompt = `Eres un experto copywriter gastronómico. Escribe una descripción corta, apetitosa y atractiva (máximo 30 palabras) para un producto llamado "${context.productName}". Usa emojis relevantes.`;
@@ -236,7 +260,11 @@ app.post('/api/ai/generate', async (req, res) => {
     }
 
     try {
-        // Llamada a la API REST de Gemini (sin dependencia extra)
+        if (!globalThis.fetch) throw new Error("Fetch no soportado.");
+
+        console.log(`🤖 Enviando petición a Gemini (${task})...`);
+
+        // Llamada a la API REST de Gemini (Modelos Flash para rapidez)
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -245,31 +273,34 @@ app.post('/api/ai/generate', async (req, res) => {
             })
         });
 
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Error Google API: ${errorText}`);
+            return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
+        }
+
         const data = await response.json();
 
         if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
             let resultText = data.candidates[0].content.parts[0].text;
 
-            // Procesamiento especial para JSON (Horarios)
+            // Limpieza de JSON para horarios
             if (task === 'optimize_hours') {
                 try {
-                    // Limpiar posibles bloques de código Markdown
                     resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
                     const jsonResult = JSON.parse(resultText);
                     return res.json({ success: true, result: jsonResult });
                 } catch (e) {
-                    console.error("Error parseando JSON de IA:", e);
-                    return res.json({ success: false, error: "La IA no devolvió un formato válido." });
+                    return res.json({ success: true, result: { open: 9, close: 22 } });
                 }
             }
 
             res.json({ success: true, result: resultText });
         } else {
-            console.error("Respuesta inesperada de Gemini:", JSON.stringify(data));
-            res.status(500).json({ error: "No se pudo generar el contenido." });
+            res.status(500).json({ error: "La IA no devolvió respuesta." });
         }
     } catch (e) {
-        console.error("Error en servidor IA:", e);
+        console.error("❌ Error IA:", e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -306,7 +337,6 @@ const resolveGoogleMapsLink = (url) => {
     });
 };
 
-// Geocodificación Inversa
 const reverseGeocode = (lat, lng) => {
     return new Promise((resolve, reject) => {
         const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;

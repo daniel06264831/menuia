@@ -264,8 +264,10 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
-        // Llamada a la API REST de Gemini (Modelos Flash para rapidez)
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        // CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash-001' en lugar de 'gemini-1.5-flash'
+        // Esto evita errores de "Model not found" en la API v1beta.
+        const modelName = 'gemini-1.5-flash-001';
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -610,12 +612,19 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al activar" }); }
 });
 
-app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); }); 
-app.get('/register', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'landing.html')); });
-app.get('/tienda/:slug', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
-app.get('/admin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
-app.get('/controladmin', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'controladmin.html')); });
-app.get('/cocina', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'kitchen.html')); });
-app.get('/marketplace', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'marketplace.html')); });
+// --- CAMBIO: RUTAS FRONTEND ELIMINADAS ---
+// Como el frontend está en un hosting externo, este servidor solo responde datos (JSON).
+// Dejamos la raíz '/' con un mensaje para saber que el backend funciona.
+
+app.get('/', (req, res) => { 
+    res.json({ 
+        status: "Online", 
+        message: "Servidor API Backend funcionando correctamente 🚀", 
+        info: "El frontend (HTML) debe estar alojado en un hosting externo." 
+    }); 
+});
+
+// Las rutas antiguas (/tienda/:slug, /admin, etc.) se eliminan de aquí 
+// porque ahora esas URL las manejará tu Hosting de Frontend, no este servidor.
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

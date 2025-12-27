@@ -697,7 +697,7 @@ app.post('/api/analytics/summary', async (req, res) => {
 
 app.get('/api/shops/public', async (req, res) => {
     try {
-        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen').lean();
+        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
         res.json({ success: true, shops });
     } catch (e) { res.status(500).json({ error: "Error al obtener tiendas" }); }
 });

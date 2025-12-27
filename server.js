@@ -268,11 +268,11 @@ app.post('/api/ai/generate', async (req, res) => {
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
         // =========================================================================
-        // CAMBIO CRÍTICO: Usamos 'gemini-pro' (1.0).
-        // 'gemini-1.5-flash' te estaba dando errores 404.
-        // 'gemini-pro' es el modelo estable y universal.
+        // INTENTO ROBUSTO: Usamos 'gemini-1.5-flash'.
+        // Si falla con 404, el sistema intentará listar los modelos disponibles
+        // para que puedas ver en los logs de Render cuál es el correcto.
         // =========================================================================
-        const modelName = 'gemini-pro';
+        const modelName = 'gemini-1.5-flash';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
@@ -286,9 +286,18 @@ app.post('/api/ai/generate', async (req, res) => {
             const errorText = await response.text();
             console.error(`❌ Error Google API: ${errorText}`);
             
-            // Mensaje de error amigable para el cliente
+            // --- DIAGNÓSTICO AUTOMÁTICO PARA ERROR 404 ---
             if (response.status === 404) {
-                 return res.status(404).json({ error: "Modelo de IA no encontrado. Verifica la API Key y el modelo." });
+                 console.log("⚠️ Diagnóstico: Modelo no encontrado. Consultando lista de modelos disponibles para esta Key...");
+                 try {
+                     const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+                     const listData = await listResp.json();
+                     console.log("📋 MODELOS DISPONIBLES EN TU CUENTA:", JSON.stringify(listData, null, 2));
+                 } catch (listErr) {
+                     console.error("⚠️ No se pudo obtener la lista de modelos:", listErr.message);
+                 }
+
+                 return res.status(404).json({ error: "Modelo de IA no encontrado. Revisa los logs de Render para ver la lista de modelos disponibles." });
             }
             return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
         }

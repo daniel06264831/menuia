@@ -268,11 +268,11 @@ app.post('/api/ai/generate', async (req, res) => {
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
         // =========================================================================
-        // INTENTO ROBUSTO: Usamos 'gemini-1.5-flash'.
-        // Si falla con 404, el sistema intentará listar los modelos disponibles
-        // para que puedas ver en los logs de Render cuál es el correcto.
+        // CAMBIO PRO: Usamos 'gemini-1.5-pro-002'.
+        // Al tener el plan Pro, usamos el modelo "Pro" (más inteligente que Flash).
+        // La versión '002' es la estable y recomendada para cuentas de pago.
         // =========================================================================
-        const modelName = 'gemini-1.5-flash';
+        const modelName = 'gemini-1.5-pro-002';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
@@ -288,16 +288,18 @@ app.post('/api/ai/generate', async (req, res) => {
             
             // --- DIAGNÓSTICO AUTOMÁTICO PARA ERROR 404 ---
             if (response.status === 404) {
-                 console.log("⚠️ Diagnóstico: Modelo no encontrado. Consultando lista de modelos disponibles para esta Key...");
+                 console.log("⚠️ Diagnóstico: Modelo no encontrado. Intentando listar nombres...");
                  try {
                      const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
                      const listData = await listResp.json();
-                     console.log("📋 MODELOS DISPONIBLES EN TU CUENTA:", JSON.stringify(listData, null, 2));
+                     // Solo mostramos los nombres para que el log sea legible
+                     const modelNames = listData.models ? listData.models.map(m => m.name) : "No models found";
+                     console.log("📋 LISTA DE NOMBRES DE MODELOS:", JSON.stringify(modelNames, null, 2));
                  } catch (listErr) {
-                     console.error("⚠️ No se pudo obtener la lista de modelos:", listErr.message);
+                     console.error("⚠️ No se pudo obtener la lista:", listErr.message);
                  }
 
-                 return res.status(404).json({ error: "Modelo de IA no encontrado. Revisa los logs de Render para ver la lista de modelos disponibles." });
+                 return res.status(404).json({ error: "Modelo de IA no encontrado. Revisa los logs de Render para ver la lista exacta." });
             }
             return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
         }

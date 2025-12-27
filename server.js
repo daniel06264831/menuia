@@ -387,7 +387,8 @@ const reverseGeocode = (lat, lng) => {
 
 const fetchNominatim = (query, limit = 1) => {
     return new Promise((resolve, reject) => {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&addressdetails=1`;
+        // Limit to Mexico to reduce noise and improve relevance
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&addressdetails=1&countrycodes=mx`;
         console.log(`🌍 Geocoding (${limit}): ${query}`);
 
         const req = https.get(url, {
@@ -402,18 +403,12 @@ const fetchNominatim = (query, limit = 1) => {
                 try {
                     const json = JSON.parse(data);
                     if (json && Array.isArray(json)) {
-                        // Map results to a cleaner format
                         const results = json.map(item => ({
                             lat: parseFloat(item.lat),
                             lng: parseFloat(item.lon),
                             address: item.display_name,
                             type: item.type
                         }));
-
-                        // If limit is 1, return single object (backward compatibility behavior if needed, 
-                        // but actually my previous code expected a single object or null from the PROMISE, 
-                        // but here I am changing the generic fetcher. 
-                        // Let's keep it returning the array and handle inside geocodeAddress).
                         resolve(results);
                     } else resolve([]);
                 } catch (e) { resolve([]); }
@@ -432,23 +427,41 @@ const geocodeAddress = async (address) => {
     let results = await fetchNominatim(address, 1);
     if (results.length > 0) return results[0];
 
-    // 2. Estrategia: Limpieza
+    // 2. Limpieza General (Expandir, quitar CP, quitar Col.)
     let clean = address
         .replace(/,?\s*Jal\.?/gi, ", Jalisco")
-        .replace(/\b\d{5}\b/g, "")
+        .replace(/\b\d{5}\b/g, "") // Quitar ZIP 5 digitos
         .replace(/Col\.|Colonia/gi, "");
 
-    console.log(`🔄 Re-intentando geocoding con: ${clean}`);
-    results = await fetchNominatim(clean, 1);
-    if (results.length > 0) return results[0];
-
-    // 3. Estrategia: Simple
-    const parts = address.split(',').map(p => p.trim());
-    if (parts.length >= 3) {
-        const simple = `${parts[0]}, ${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
-        console.log(`🔄 Re-intentando simple: ${simple}`);
-        results = await fetchNominatim(simple, 1);
+    // Si cambió algo, probamos
+    if (clean !== address) {
+        console.log(`🔄 Re-intentando geocoding con: ${clean}`);
+        results = await fetchNominatim(clean, 1);
         if (results.length > 0) return results[0];
+    }
+
+    // 3. Estrategia "Street + City" Agresiva
+    // Asumimos que la PRIMERA parte es la calle+número y alguna de las ULTIMAS es la ciudad.
+    const parts = address.split(',').map(p => p.trim()).filter(p => p.length > 0);
+
+    if (parts.length >= 2) {
+        // Intentamos: Parte 1 + Parte -1 (Estado) + Parte -2 (Ciudad?)
+        // Caso: "Río Oro 979, El Vergel, 45595 San Pedro Tlaquepaque, Jal."
+        // clean ya quitó el 45595 y Jal. -> "Río Oro 979, El Vergel, San Pedro Tlaquepaque, Jalisco"
+        // parts de clean: [ "Río Oro 979", "El Vergel", "San Pedro Tlaquepaque", "Jalisco" ]
+
+        // Probamos: Part[0] + Part[Length-2] (Ciudad)
+        if (parts.length >= 3) {
+            // Usamos clean para el split para que no tenga basura
+            const cleanParts = clean.split(',').map(p => p.trim()).filter(p => p);
+            if (cleanParts.length >= 2) {
+                // Street + City (assumed second to last) + Mexico
+                const simple = `${cleanParts[0]}, ${cleanParts[cleanParts.length - 2]}, Mexico`;
+                console.log(`🔄 Re-intentando simple: ${simple}`);
+                results = await fetchNominatim(simple, 1);
+                if (results.length > 0) return results[0];
+            }
+        }
     }
 
     return null;
@@ -548,26 +561,28 @@ app.post('/api/utils/search-address', async (req, res) => {
         // 1. Intento Directo
         let results = await fetchNominatim(query, 5);
 
-        // 2. Si no hay resultados, intentar limpieza (Misma lógica que geocodeAddress)
+        // 2. Si no hay resultados, intentar limpieza y estrategias
         if (!results || results.length === 0) {
             let clean = query
                 .replace(/,?\s*Jal\.?/gi, ", Jalisco")
                 .replace(/\b\d{5}\b/g, "")
                 .replace(/Col\.|Colonia/gi, "");
 
+            // Intento Clean
             if (clean !== query) {
-                console.log(`🔎 Autocomplete Retry (Clean): ${clean}`);
                 results = await fetchNominatim(clean, 5);
             }
-        }
 
-        // 3. Si sigue vacío, intentar super simple (Calle + Ciudad)
-        if (!results || results.length === 0) {
-            const parts = query.split(',').map(p => p.trim());
-            if (parts.length >= 3) {
-                const simple = `${parts[0]}, ${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
-                console.log(`🔎 Autocomplete Retry (Simple): ${simple}`);
-                results = await fetchNominatim(simple, 5);
+            // Intento "Simple" si aun falla
+            if ((!results || results.length === 0) && clean.includes(',')) {
+                // Usamos la logica de partes limpias
+                const parts = clean.split(',').map(p => p.trim()).filter(p => p);
+                if (parts.length >= 3) {
+                    // Street + City
+                    const simple = `${parts[0]}, ${parts[parts.length - 2]}`;
+                    console.log(`🔎 Autocomplete Simple: ${simple}`);
+                    results = await fetchNominatim(simple, 5);
+                }
             }
         }
 
@@ -784,3 +799,4 @@ app.get('/', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
+

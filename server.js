@@ -462,12 +462,30 @@ app.post('/api/shop/:slug', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "No encontrado" });
         if (shop.credentials.password !== password) return res.status(403).json({ error: "No autorizado" });
+        
+        // Mantener/Mezclar config para evitar borrados accidentales si el frontend no manda todo
+        // Aunque el frontend actual manda todo, es mas seguro hacer merge en campos top-level
+        // Sin embargo, Mongoose maneja objetos anidados. 
+        // Vamos a asignar directamente pero asegurando tipos en coords.
+        
+        if (data.config.coords) {
+            data.config.coords.lat = parseFloat(data.config.coords.lat);
+            data.config.coords.lng = parseFloat(data.config.coords.lng);
+        }
+
         shop.config = data.config;
         shop.menu = data.menu;
+        
         await shop.save();
+        
+        console.log(`✅ Tienda ${slug} actualizada. Dirección: ${shop.config.address}, Coords: ${JSON.stringify(shop.config.coords)}`);
+        
         io.to(slug).emit('shop-updated', { message: 'Datos actualizados' });
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: "Error al guardar" }); }
+    } catch (e) { 
+        console.error("Error saving shop:", e);
+        res.status(500).json({ error: "Error al guardar" }); 
+    }
 });
 
 app.post('/api/utils/parse-map', async (req, res) => {

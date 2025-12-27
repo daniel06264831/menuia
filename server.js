@@ -267,12 +267,12 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
-        // =================================================================================
-        // NOTA: Usamos 'gemini-1.5-flash' con fetch.
-        // Esto hace lo mismo que la librería @google/genai pero sin necesidad de instalarla.
-        // 'gemini-2.5-flash' es probablemente un typo; usamos la versión estable 1.5.
-        // =================================================================================
-        const modelName = 'gemini-1.5-flash';
+        // =========================================================================
+        // CAMBIO CRÍTICO: Usamos 'gemini-pro' (1.0).
+        // 'gemini-1.5-flash' te estaba dando errores 404.
+        // 'gemini-pro' es el modelo estable y universal.
+        // =========================================================================
+        const modelName = 'gemini-pro';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',

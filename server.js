@@ -268,11 +268,11 @@ app.post('/api/ai/generate', async (req, res) => {
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
         // =========================================================================
-        // CAMBIO PRO: Usamos 'gemini-1.5-pro-002'.
-        // Al tener el plan Pro, usamos el modelo "Pro" (más inteligente que Flash).
-        // La versión '002' es la estable y recomendada para cuentas de pago.
+        // CAMBIO FINAL: Usamos 'gemini-2.5-flash'.
+        // Basado en el diagnóstico de tu cuenta, este modelo SÍ está disponible
+        // y es mucho más avanzado que la versión 1.5.
         // =========================================================================
-        const modelName = 'gemini-1.5-pro-002';
+        const modelName = 'gemini-2.5-flash';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',

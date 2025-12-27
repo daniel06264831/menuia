@@ -258,24 +258,23 @@ app.post('/api/ai/generate', async (req, res) => {
         prompt = `Eres un community manager experto. Escribe un post para redes sociales (Instagram/Facebook) para el negocio "${context.shopName}". El estilo debe ser: ${context.style}. Incluye emojis y hashtags. Máximo 280 caracteres.`;
     } else if (task === 'optimize_hours') {
         prompt = `Para un negocio de tipo "${context.businessType}", sugiere un horario de apertura y cierre óptimo basado en estándares de la industria. Responde SOLAMENTE con un objeto JSON válido en este formato exacto, sin markdown ni explicaciones: {"open": 9, "close": 23}`;
-    
-    // --- NUEVA TAREA: CHAT DE MENÚ (REAL) ---
-    } else if (task === 'menu_chat') {
-        // Limitamos el contexto del menú para no saturar el token limit, enviando solo nombres y descripciones.
-        const menuSummary = context.menu.map(i => `${i.name} ($${i.price}): ${i.description || ''}`).join('\n');
-        
-        prompt = `Eres un mesero virtual amigable y experto llamado "IA Chef".
+    } else if (task === 'chef_chat') {
+        // --- NUEVO TASK: CHAT DE CHEF PARA EL MENÚ ---
+        // Contexto esperado: context.menu (array de items simplificados), context.userMsg
+        const menuSummary = (context.menu || []).map(i => `${i.name} ($${i.price})`).join(', ');
+        prompt = `
+        Eres el "Chef Virtual" de este restaurante. Tu trabajo es recomendar platillos del menú a los clientes de forma amigable y breve.
         
         MENÚ DISPONIBLE:
         ${menuSummary}
-
-        USUARIO DICE: "${context.message}"
-
-        TU TAREA:
-        1. Responde al usuario recomendando 1 o 2 productos específicos del menú anterior.
-        2. Sé breve (máximo 40 palabras), usa emojis y sé persuasivo.
-        3. Si el usuario saluda, saluda y ofrece ayuda.
-        4. Si el usuario pide algo que NO está en el menú, sugiere amablemente algo parecido que SÍ esté.
+        
+        USUARIO DICE: "${context.userMsg}"
+        
+        INSTRUCCIONES:
+        1. Responde de forma muy breve (máximo 40 palabras).
+        2. Recomienda algo del menú si encaja con lo que dice el usuario.
+        3. Usa emojis 😋.
+        4. Si preguntan algo que no sea comida, responde con humor relacionado con comida.
         `;
     } else {
         return res.status(400).json({ error: "Tarea no reconocida" });
@@ -286,6 +285,9 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
+        // =========================================================================
+        // CAMBIO FINAL: Usamos 'gemini-2.5-flash'.
+        // =========================================================================
         const modelName = 'gemini-2.5-flash';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
@@ -307,6 +309,7 @@ app.post('/api/ai/generate', async (req, res) => {
         if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
             let resultText = data.candidates[0].content.parts[0].text;
 
+            // Limpieza de JSON para horarios
             if (task === 'optimize_hours') {
                 try {
                     resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();

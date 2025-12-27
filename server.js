@@ -147,8 +147,11 @@ const Customer = mongoose.model('Customer', CustomerSchema);
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(__dirname));
+
+// --- MODO API BACKEND ---
+// Comentamos esto porque tu frontend está en un HOSTING EXTERNO.
+// app.use(express.static(path.join(__dirname, 'public')));
+// app.use(express.static(__dirname));
 
 // --- HELPERS STATS DIARIOS ---
 const checkDailyReset = (shop) => {
@@ -264,9 +267,13 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
-        // CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash-001' en lugar de 'gemini-1.5-flash'
-        // Esto evita errores de "Model not found" en la API v1beta.
-        const modelName = 'gemini-1.5-flash-001';
+        // =================================================================================
+        // NOTA: Usamos 'gemini-1.5-flash' con fetch.
+        // Esto hace lo mismo que la librería @google/genai pero sin necesidad de instalarla.
+        // 'gemini-2.5-flash' es probablemente un typo; usamos la versión estable 1.5.
+        // =================================================================================
+        const modelName = 'gemini-1.5-flash';
+        
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -278,6 +285,11 @@ app.post('/api/ai/generate', async (req, res) => {
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`❌ Error Google API: ${errorText}`);
+            
+            // Mensaje de error amigable para el cliente
+            if (response.status === 404) {
+                 return res.status(404).json({ error: "Modelo de IA no encontrado. Verifica la API Key y el modelo." });
+            }
             return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
         }
 
@@ -612,19 +624,15 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al activar" }); }
 });
 
-// --- CAMBIO: RUTAS FRONTEND ELIMINADAS ---
-// Como el frontend está en un hosting externo, este servidor solo responde datos (JSON).
-// Dejamos la raíz '/' con un mensaje para saber que el backend funciona.
+// --- MODO API: RUTAS FRONTEND ELIMINADAS ---
+// No servimos archivos estáticos. Solo un JSON de bienvenida.
 
 app.get('/', (req, res) => { 
     res.json({ 
         status: "Online", 
         message: "Servidor API Backend funcionando correctamente 🚀", 
-        info: "El frontend (HTML) debe estar alojado en un hosting externo." 
+        info: "El frontend (HTML) debe estar alojado en un hosting externo (ej: Netlify/Vercel)." 
     }); 
 });
-
-// Las rutas antiguas (/tienda/:slug, /admin, etc.) se eliminan de aquí 
-// porque ahora esas URL las manejará tu Hosting de Frontend, no este servidor.
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });

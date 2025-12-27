@@ -1,5 +1,5 @@
 const express = require('express');
-const http = require('http'); 
+const http = require('http');
 const { Server } = require("socket.io");
 const mongoose = require('mongoose');
 const path = require('path');
@@ -9,7 +9,7 @@ const https = require('https');
 
 // --- CORRECCIÓN PARA RENDER ---
 try {
-    require('dotenv').config(); 
+    require('dotenv').config();
 } catch (e) {
     console.log("Nota: 'dotenv' no encontrado. Usando variables de entorno del sistema.");
 }
@@ -39,7 +39,7 @@ const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThp
 // El servidor leerá la clave desde la configuración de Render.
 // NO escribas tu clave aquí.
 // ==========================================
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
@@ -71,26 +71,26 @@ const ShopSchema = new mongoose.Schema({
         ownerName: String,
         contactPhone: String
     },
-    subscription: { 
-        status: { type: String, default: 'trial' }, 
-        plan: { type: String, default: 'free' }, 
+    subscription: {
+        status: { type: String, default: 'trial' },
+        plan: { type: String, default: 'free' },
         validUntil: Date,
         startDate: { type: Date, default: Date.now }
     },
-    stats: { 
-        visits: { type: Number, default: 0 }, 
+    stats: {
+        visits: { type: Number, default: 0 },
         orders: { type: Number, default: 0 },
         lastReset: { type: String, default: '' } // Formato YYYY-MM-DD
     },
     config: {
-        name: String, 
-        address: String, 
-        whatsapp: String, 
+        name: String,
+        address: String,
+        whatsapp: String,
         businessType: { type: String, default: "Comida General" },
         heroImage: String,
         coords: { lat: Number, lng: Number },
         hours: { open: Number, close: Number },
-        
+
         // Alta Demanda
         highDemand: { type: Boolean, default: false },
         highDemandTime: String,
@@ -98,17 +98,17 @@ const ShopSchema = new mongoose.Schema({
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
         bank: { name: String, clabe: String, owner: String },
         bankDetails: { name: String, clabe: String, owner: String },
-        categoryTitles: { 
-            promos: { type: String, default: "🔥 Promociones" }, 
-            especiales: { type: String, default: "⭐ Recomendados" }, 
-            clasicos: { type: String, default: "🍽️ Menú Principal" }, 
-            extras: { type: String, default: "🥤 Bebidas y Otros" } 
+        categoryTitles: {
+            promos: { type: String, default: "🔥 Promociones" },
+            especiales: { type: String, default: "⭐ Recomendados" },
+            clasicos: { type: String, default: "🍽️ Menú Principal" },
+            extras: { type: String, default: "🥤 Bebidas y Otros" }
         }
     },
-    menu: { 
-        promos: [mongoose.Schema.Types.Mixed], 
-        especiales: [mongoose.Schema.Types.Mixed], 
-        clasicos: [mongoose.Schema.Types.Mixed], 
+    menu: {
+        promos: [mongoose.Schema.Types.Mixed],
+        especiales: [mongoose.Schema.Types.Mixed],
+        clasicos: [mongoose.Schema.Types.Mixed],
         extras: [mongoose.Schema.Types.Mixed],
         groups: [mongoose.Schema.Types.Mixed]
     }
@@ -125,8 +125,8 @@ const OrderSchema = new mongoose.Schema({
     address: String,
     paymentMethod: String,
     type: String,
-    items: [mongoose.Schema.Types.Mixed], 
-    total: String, 
+    items: [mongoose.Schema.Types.Mixed],
+    total: String,
     status: { type: String, default: 'pending' },
     createdAt: { type: Date, default: Date.now }
 });
@@ -160,12 +160,12 @@ app.use(bodyParser.json({ limit: '50mb' }));
 
 // --- HELPERS STATS DIARIOS ---
 const checkDailyReset = (shop) => {
-    const today = new Date().toLocaleDateString('en-CA'); 
+    const today = new Date().toLocaleDateString('en-CA');
     if (shop.stats.lastReset !== today) {
         shop.stats.visits = 0;
         shop.stats.orders = 0;
         shop.stats.lastReset = today;
-        return true; 
+        return true;
     }
     return false;
 };
@@ -174,15 +174,15 @@ const checkDailyReset = (shop) => {
 io.on('connection', (socket) => {
     console.log(`🔌 Nuevo cliente conectado: ${socket.id}`);
 
-    socket.on('join-store', (slug) => { 
-        socket.join(slug); 
+    socket.on('join-store', (slug) => {
+        socket.join(slug);
     });
-    
+
     socket.on('register-visit', async (slug) => {
         try {
             let shop = await Shop.findOne({ slug });
             if (shop) {
-                checkDailyReset(shop); 
+                checkDailyReset(shop);
                 shop.stats.visits += 1;
                 await shop.save();
                 io.to(slug).emit('stats-update', shop.stats);
@@ -209,8 +209,8 @@ io.on('connection', (socket) => {
                 let newOrder = null;
                 if (orderData) {
                     const startOfDay = new Date();
-                    startOfDay.setHours(0,0,0,0);
-                    
+                    startOfDay.setHours(0, 0, 0, 0);
+
                     const countToday = await Order.countDocuments({
                         shopSlug: slug,
                         createdAt: { $gte: startOfDay }
@@ -229,7 +229,7 @@ io.on('connection', (socket) => {
                         status: orderData.status || 'pending',
                         createdAt: new Date()
                     });
-                    
+
                     io.to(slug).emit('new-order-saved');
                     io.to(slug).emit('order-created-client', newOrder);
                 }
@@ -240,13 +240,13 @@ io.on('connection', (socket) => {
         } catch (e) { console.error("Error stats order:", e); }
     });
 
-    socket.on('disconnect', () => {});
+    socket.on('disconnect', () => { });
 });
 
 // --- API IA (GOOGLE GEMINI) ---
 app.post('/api/ai/generate', async (req, res) => {
     const { task, context } = req.body;
-    
+
     // Verificación de seguridad
     if (!GEMINI_API_KEY) {
         console.error("❌ ERROR IA: No se encontró la variable GEMINI_API_KEY en Render.");
@@ -291,7 +291,7 @@ app.post('/api/ai/generate', async (req, res) => {
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
         const modelName = 'gemini-2.5-flash';
-        
+
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -371,10 +371,10 @@ const reverseGeocode = (lat, lng) => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
-                try { 
-                    const json = JSON.parse(data); 
-                    if (json && json.display_name) resolve(json.display_name); 
-                    else resolve(null); 
+                try {
+                    const json = JSON.parse(data);
+                    if (json && json.display_name) resolve(json.display_name);
+                    else resolve(null);
                 } catch (e) { reject(e); }
             });
         }).on('error', reject);
@@ -388,15 +388,15 @@ const geocodeAddress = (address) => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
-                try { 
-                    const json = JSON.parse(data); 
+                try {
+                    const json = JSON.parse(data);
                     if (json && json.length > 0) {
-                        resolve({ 
-                            lat: parseFloat(json[0].lat), 
+                        resolve({
+                            lat: parseFloat(json[0].lat),
                             lng: parseFloat(json[0].lon),
-                            address: json[0].display_name 
-                        }); 
-                    } else resolve(null); 
+                            address: json[0].display_name
+                        });
+                    } else resolve(null);
                 } catch (e) { reject(e); }
             });
         }).on('error', reject);
@@ -448,7 +448,7 @@ app.post('/api/admin/get', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
         if (shop.credentials.password !== password) return res.status(401).json({ error: "Contraseña incorrecta" });
-        
+
         if (checkDailyReset(shop)) await shop.save();
 
         res.json(shop);
@@ -462,12 +462,12 @@ app.post('/api/shop/:slug', async (req, res) => {
         const shop = await Shop.findOne({ slug });
         if (!shop) return res.status(404).json({ error: "No encontrado" });
         if (shop.credentials.password !== password) return res.status(403).json({ error: "No autorizado" });
-        
+
         // Mantener/Mezclar config para evitar borrados accidentales si el frontend no manda todo
         // Aunque el frontend actual manda todo, es mas seguro hacer merge en campos top-level
         // Sin embargo, Mongoose maneja objetos anidados. 
         // Vamos a asignar directamente pero asegurando tipos en coords.
-        
+
         if (data.config.coords) {
             data.config.coords.lat = parseFloat(data.config.coords.lat);
             data.config.coords.lng = parseFloat(data.config.coords.lng);
@@ -475,16 +475,16 @@ app.post('/api/shop/:slug', async (req, res) => {
 
         shop.config = data.config;
         shop.menu = data.menu;
-        
+
         await shop.save();
-        
+
         console.log(`✅ Tienda ${slug} actualizada. Dirección: ${shop.config.address}, Coords: ${JSON.stringify(shop.config.coords)}`);
-        
+
         io.to(slug).emit('shop-updated', { message: 'Datos actualizados' });
         res.json({ success: true });
-    } catch (e) { 
+    } catch (e) {
         console.error("Error saving shop:", e);
-        res.status(500).json({ error: "Error al guardar" }); 
+        res.status(500).json({ error: "Error al guardar" });
     }
 });
 
@@ -496,7 +496,7 @@ app.post('/api/utils/parse-map', async (req, res) => {
             const finalUrl = await resolveGoogleMapsLink(input);
             const regex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
             const match = finalUrl.match(regex);
-            
+
             if (match) {
                 const lat = parseFloat(match[1]);
                 const lng = parseFloat(match[2]);
@@ -525,6 +525,18 @@ app.post('/api/utils/parse-map', async (req, res) => {
 
         res.status(400).json({ error: "No se encontraron coordenadas." });
     } catch (e) { res.status(500).json({ error: "Error procesando ubicación." }); }
+});
+
+app.post('/api/utils/reverse-geocode', async (req, res) => {
+    const { lat, lng } = req.body;
+    if (!lat || !lng) return res.status(400).json({ error: "Faltan coordenadas" });
+    try {
+        const address = await reverseGeocode(lat, lng);
+        res.json({ success: true, address: address || "Dirección no encontrada" });
+    } catch (e) {
+        console.error("Geocode error:", e);
+        res.status(500).json({ error: "Error al obtener dirección" });
+    }
 });
 
 // --- RUTAS NUEVAS: CLIENTES ---
@@ -558,7 +570,7 @@ app.post('/api/customer/login', async (req, res) => {
 app.post('/api/customer/update-tastes', async (req, res) => {
     const { phone, tastes } = req.body;
     if (!phone || !tastes) return res.status(400).json({ error: "Faltan datos" });
-    
+
     try {
         await Customer.findOneAndUpdate({ phone }, { tastes });
         res.json({ success: true });
@@ -574,7 +586,7 @@ app.post('/api/orders/list', async (req, res) => {
     try {
         const shop = await Shop.findOne({ slug });
         if (!shop || shop.credentials.password !== password) return res.status(401).json({ error: "No autorizado" });
-        
+
         let query = { shopSlug: slug };
         if (startDate || endDate) {
             query.createdAt = {};
@@ -614,22 +626,22 @@ app.post('/api/analytics/summary', async (req, res) => {
         let salesToday = 0;
         let salesMonth = 0;
         const last7Days = {};
-        for(let i=6; i>=0; i--) {
+        for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            last7Days[d.toLocaleDateString('en-US', {weekday: 'short'})] = 0;
+            last7Days[d.toLocaleDateString('en-US', { weekday: 'short' })] = 0;
         }
 
         monthlyOrders.forEach(o => {
             let val = 0;
-            if(typeof o.total === 'string') val = parseFloat(o.total.replace(/[^0-9.-]+/g,""));
+            if (typeof o.total === 'string') val = parseFloat(o.total.replace(/[^0-9.-]+/g, ""));
             else if (typeof o.total === 'number') val = o.total;
-            if(isNaN(val)) val = 0;
-            
-            salesMonth += val;
-            if(o.createdAt >= startOfDay) salesToday += val;
+            if (isNaN(val)) val = 0;
 
-            const dayKey = new Date(o.createdAt).toLocaleDateString('en-US', {weekday: 'short'});
+            salesMonth += val;
+            if (o.createdAt >= startOfDay) salesToday += val;
+
+            const dayKey = new Date(o.createdAt).toLocaleDateString('en-US', { weekday: 'short' });
             if (last7Days[dayKey] !== undefined) last7Days[dayKey] += val;
         });
 
@@ -674,12 +686,13 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
 // --- MODO API: RUTAS FRONTEND ELIMINADAS ---
 // No servimos archivos estáticos. Solo un JSON de bienvenida.
 
-app.get('/', (req, res) => { 
-    res.json({ 
-        status: "Online", 
-        message: "Servidor API Backend funcionando correctamente 🚀", 
-        info: "El frontend (HTML) debe estar alojado en un hosting externo (ej: Netlify/Vercel)." 
-    }); 
+app.get('/', (req, res) => {
+    res.json({
+        status: "Online",
+        message: "Servidor API Backend funcionando correctamente 🚀",
+        info: "El frontend (HTML) debe estar alojado en un hosting externo (ej: Netlify/Vercel)."
+    });
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
+

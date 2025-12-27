@@ -385,10 +385,17 @@ const reverseGeocode = (lat, lng) => {
     });
 };
 
-const geocodeAddress = (address) => {
+const fetchNominatim = (query) => {
     return new Promise((resolve, reject) => {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
-        https.get(url, { headers: { 'User-Agent': 'MiPlataforma/1.0' } }, (res) => {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+        console.log(`🌍 Geocoding: ${query}`);
+
+        const req = https.get(url, {
+            headers: {
+                'User-Agent': 'MiPlataforma/1.0',
+                'Accept-Language': 'es-MX,es;q=0.9'
+            }
+        }, (res) => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
@@ -401,10 +408,45 @@ const geocodeAddress = (address) => {
                             address: json[0].display_name
                         });
                     } else resolve(null);
-                } catch (e) { reject(e); }
+                } catch (e) { resolve(null); }
             });
-        }).on('error', reject);
+        });
+
+        req.on('error', (e) => {
+            console.error("Geo Request Error:", e.message);
+            resolve(null);
+        });
     });
+};
+
+const geocodeAddress = async (address) => {
+    // 1. Intento Directo
+    let result = await fetchNominatim(address);
+    if (result) return result;
+
+    // 2. Estrategia: Limpieza de Estado (Jalisco/Jal) y CP
+    // Google Maps a veces da "..., Jal." y Nominatim prefiere "Jalisco" o nada.
+    let clean = address
+        .replace(/,?\s*Jal\.?/gi, ", Jalisco") // Expandir Jal.
+        .replace(/\b\d{5}\b/g, "") // Quitar CP (ayuda si está mal)
+        .replace(/Col\.|Colonia/gi, ""); // Quitar "Col."
+
+    console.log(`🔄 Re-intentando geocoding con: ${clean}`);
+    result = await fetchNominatim(clean);
+    if (result) return result;
+
+    // 3. Estrategia: Solo Calle y Ciudad (Muy agresivo)
+    // Intentamos quitar todo lo que parezca una colonia o entre comas extras
+    // Asumimos formato "Calle Num, Colonia, Ciudad, Estado"
+    // Tomamos la primera parte (Calle Num) y las ultimas 2 (Ciudad, Estado)
+    const parts = address.split(',').map(p => p.trim());
+    if (parts.length >= 3) {
+        const simple = `${parts[0]}, ${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
+        console.log(`🔄 Re-intentando simple: ${simple}`);
+        result = await fetchNominatim(simple);
+    }
+
+    return result;
 };
 
 // --- RUTAS API TIENDAS ---

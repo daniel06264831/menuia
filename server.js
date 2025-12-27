@@ -385,10 +385,10 @@ const reverseGeocode = (lat, lng) => {
     });
 };
 
-const fetchNominatim = (query) => {
+const fetchNominatim = (query, limit = 1) => {
     return new Promise((resolve, reject) => {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
-        console.log(`🌍 Geocoding: ${query}`);
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&addressdetails=1`;
+        console.log(`🌍 Geocoding (${limit}): ${query}`);
 
         const req = https.get(url, {
             headers: {
@@ -401,52 +401,57 @@ const fetchNominatim = (query) => {
             res.on('end', () => {
                 try {
                     const json = JSON.parse(data);
-                    if (json && json.length > 0) {
-                        resolve({
-                            lat: parseFloat(json[0].lat),
-                            lng: parseFloat(json[0].lon),
-                            address: json[0].display_name
-                        });
-                    } else resolve(null);
-                } catch (e) { resolve(null); }
+                    if (json && Array.isArray(json)) {
+                        // Map results to a cleaner format
+                        const results = json.map(item => ({
+                            lat: parseFloat(item.lat),
+                            lng: parseFloat(item.lon),
+                            address: item.display_name,
+                            type: item.type
+                        }));
+
+                        // If limit is 1, return single object (backward compatibility behavior if needed, 
+                        // but actually my previous code expected a single object or null from the PROMISE, 
+                        // but here I am changing the generic fetcher. 
+                        // Let's keep it returning the array and handle inside geocodeAddress).
+                        resolve(results);
+                    } else resolve([]);
+                } catch (e) { resolve([]); }
             });
         });
 
         req.on('error', (e) => {
             console.error("Geo Request Error:", e.message);
-            resolve(null);
+            resolve([]);
         });
     });
 };
 
 const geocodeAddress = async (address) => {
     // 1. Intento Directo
-    let result = await fetchNominatim(address);
-    if (result) return result;
+    let results = await fetchNominatim(address, 1);
+    if (results.length > 0) return results[0];
 
-    // 2. Estrategia: Limpieza de Estado (Jalisco/Jal) y CP
-    // Google Maps a veces da "..., Jal." y Nominatim prefiere "Jalisco" o nada.
+    // 2. Estrategia: Limpieza
     let clean = address
-        .replace(/,?\s*Jal\.?/gi, ", Jalisco") // Expandir Jal.
-        .replace(/\b\d{5}\b/g, "") // Quitar CP (ayuda si está mal)
-        .replace(/Col\.|Colonia/gi, ""); // Quitar "Col."
+        .replace(/,?\s*Jal\.?/gi, ", Jalisco")
+        .replace(/\b\d{5}\b/g, "")
+        .replace(/Col\.|Colonia/gi, "");
 
     console.log(`🔄 Re-intentando geocoding con: ${clean}`);
-    result = await fetchNominatim(clean);
-    if (result) return result;
+    results = await fetchNominatim(clean, 1);
+    if (results.length > 0) return results[0];
 
-    // 3. Estrategia: Solo Calle y Ciudad (Muy agresivo)
-    // Intentamos quitar todo lo que parezca una colonia o entre comas extras
-    // Asumimos formato "Calle Num, Colonia, Ciudad, Estado"
-    // Tomamos la primera parte (Calle Num) y las ultimas 2 (Ciudad, Estado)
+    // 3. Estrategia: Simple
     const parts = address.split(',').map(p => p.trim());
     if (parts.length >= 3) {
         const simple = `${parts[0]}, ${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
         console.log(`🔄 Re-intentando simple: ${simple}`);
-        result = await fetchNominatim(simple);
+        results = await fetchNominatim(simple, 1);
+        if (results.length > 0) return results[0];
     }
 
-    return result;
+    return null;
 };
 
 // --- RUTAS API TIENDAS ---
@@ -531,6 +536,19 @@ app.post('/api/shop/:slug', async (req, res) => {
     } catch (e) {
         console.error("Error saving shop:", e);
         res.status(500).json({ error: "Error al guardar" });
+    }
+});
+
+// NUEVO ENDPOINT PARA AUTOCOMPLETE
+app.post('/api/utils/search-address', async (req, res) => {
+    const { query } = req.body;
+    if (!query || query.length < 3) return res.json({ success: true, results: [] });
+
+    try {
+        const results = await fetchNominatim(query, 5);
+        res.json({ success: true, results });
+    } catch (e) {
+        res.status(500).json({ error: "Error searching" });
     }
 });
 

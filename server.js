@@ -258,6 +258,25 @@ app.post('/api/ai/generate', async (req, res) => {
         prompt = `Eres un community manager experto. Escribe un post para redes sociales (Instagram/Facebook) para el negocio "${context.shopName}". El estilo debe ser: ${context.style}. Incluye emojis y hashtags. Máximo 280 caracteres.`;
     } else if (task === 'optimize_hours') {
         prompt = `Para un negocio de tipo "${context.businessType}", sugiere un horario de apertura y cierre óptimo basado en estándares de la industria. Responde SOLAMENTE con un objeto JSON válido en este formato exacto, sin markdown ni explicaciones: {"open": 9, "close": 23}`;
+    
+    // --- NUEVA TAREA: CHAT DE MENÚ (REAL) ---
+    } else if (task === 'menu_chat') {
+        // Limitamos el contexto del menú para no saturar el token limit, enviando solo nombres y descripciones.
+        const menuSummary = context.menu.map(i => `${i.name} ($${i.price}): ${i.description || ''}`).join('\n');
+        
+        prompt = `Eres un mesero virtual amigable y experto llamado "IA Chef".
+        
+        MENÚ DISPONIBLE:
+        ${menuSummary}
+
+        USUARIO DICE: "${context.message}"
+
+        TU TAREA:
+        1. Responde al usuario recomendando 1 o 2 productos específicos del menú anterior.
+        2. Sé breve (máximo 40 palabras), usa emojis y sé persuasivo.
+        3. Si el usuario saluda, saluda y ofrece ayuda.
+        4. Si el usuario pide algo que NO está en el menú, sugiere amablemente algo parecido que SÍ esté.
+        `;
     } else {
         return res.status(400).json({ error: "Tarea no reconocida" });
     }
@@ -267,11 +286,6 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
-        // =========================================================================
-        // CAMBIO FINAL: Usamos 'gemini-2.5-flash'.
-        // Basado en el diagnóstico de tu cuenta, este modelo SÍ está disponible
-        // y es mucho más avanzado que la versión 1.5.
-        // =========================================================================
         const modelName = 'gemini-2.5-flash';
         
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
@@ -285,22 +299,6 @@ app.post('/api/ai/generate', async (req, res) => {
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`❌ Error Google API: ${errorText}`);
-            
-            // --- DIAGNÓSTICO AUTOMÁTICO PARA ERROR 404 ---
-            if (response.status === 404) {
-                 console.log("⚠️ Diagnóstico: Modelo no encontrado. Intentando listar nombres...");
-                 try {
-                     const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
-                     const listData = await listResp.json();
-                     // Solo mostramos los nombres para que el log sea legible
-                     const modelNames = listData.models ? listData.models.map(m => m.name) : "No models found";
-                     console.log("📋 LISTA DE NOMBRES DE MODELOS:", JSON.stringify(modelNames, null, 2));
-                 } catch (listErr) {
-                     console.error("⚠️ No se pudo obtener la lista:", listErr.message);
-                 }
-
-                 return res.status(404).json({ error: "Modelo de IA no encontrado. Revisa los logs de Render para ver la lista exacta." });
-            }
             return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
         }
 
@@ -309,7 +307,6 @@ app.post('/api/ai/generate', async (req, res) => {
         if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
             let resultText = data.candidates[0].content.parts[0].text;
 
-            // Limpieza de JSON para horarios
             if (task === 'optimize_hours') {
                 try {
                     resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();

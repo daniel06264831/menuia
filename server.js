@@ -95,6 +95,9 @@ const ShopSchema = new mongoose.Schema({
         highDemand: { type: Boolean, default: false },
         highDemandTime: String,
 
+        // Manual Open/Close
+        isOpen: { type: Boolean, default: true },
+
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
         bank: { name: String, clabe: String, owner: String },
         bankDetails: { name: String, clabe: String, owner: String },
@@ -351,7 +354,8 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
             shipping: { "freeThreshold": 500, "freeKm": 2.0, "maxRadius": 5.0, "costPerKm": 10 },
             bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name },
             highDemand: false,
-            highDemandTime: ""
+            highDemandTime: "",
+            isOpen: true
         },
         menu: { promos: [], especiales: [], clasicos: [], extras: [], groups: [] }
     };
@@ -651,7 +655,7 @@ app.post('/api/analytics/summary', async (req, res) => {
 
 app.get('/api/shops/public', async (req, res) => {
     try {
-        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand').lean();
+        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen').lean();
         res.json({ success: true, shops });
     } catch (e) { res.status(500).json({ error: "Error al obtener tiendas" }); }
 });
@@ -695,4 +699,3 @@ app.get('/', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
-

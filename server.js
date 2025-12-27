@@ -139,6 +139,11 @@ const CustomerSchema = new mongoose.Schema({
     name: { type: String, required: true },
     password: { type: String, required: true },
     address: String,
+    // NUEVO CAMPO: Gustos aprendidos por la IA
+    tastes: {
+        items: [String],      // Ej: ["Pizza Hawaiana", "Sushi Roll"]
+        categories: { type: Map, of: Number } // Ej: { "Sushi": 5, "Pizza": 2 }
+    },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -287,46 +292,46 @@ app.post('/api/ai/generate', async (req, res) => {
 
         // =========================================================================
         // CAMBIO FINAL: Usamos 'gemini-2.5-flash'.
-        // =========================================================================
-        const modelName = 'gemini-2.5-flash';
-        
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
+// ... (Rutas existentes) ...
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ Error Google API: ${errorText}`);
-            return res.status(response.status).json({ error: "Error conectando con la IA de Google." });
-        }
+// --- RUTAS NUEVAS: CLIENTES ---
+app.post('/api/customer/register', async (req, res) => {
+    const { name, phone, password, address } = req.body;
+    if (!name || !phone || !password) return res.status(400).json({ error: "Faltan datos requeridos" });
+    try {
+        const existing = await Customer.findOne({ phone });
+        if (existing) return res.status(400).json({ error: "Este número ya está registrado." });
+        const customer = await Customer.create({ name, phone, password, address: address || "", tastes: { items: [], categories: {} } });
+        // Devolvemos tastes vacío al registrar
+        res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes } });
+    } catch (e) { res.status(500).json({ error: "Error al registrar cliente" }); }
+});
 
-        const data = await response.json();
-
-        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-            let resultText = data.candidates[0].content.parts[0].text;
-
-            // Limpieza de JSON para horarios
-            if (task === 'optimize_hours') {
-                try {
-                    resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-                    const jsonResult = JSON.parse(resultText);
-                    return res.json({ success: true, result: jsonResult });
-                } catch (e) {
-                    return res.json({ success: true, result: { open: 9, close: 22 } });
-                }
-            }
-
-            res.json({ success: true, result: resultText });
+app.post('/api/customer/login', async (req, res) => {
+    const { phone, password } = req.body;
+    if (!phone || !password) return res.status(400).json({ error: "Faltan datos" });
+    try {
+        const customer = await Customer.findOne({ phone });
+        if (customer && customer.password === password) {
+            // Devolvemos también los gustos guardados
+            res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes } });
         } else {
-            res.status(500).json({ error: "La IA no devolvió respuesta." });
+            res.status(401).json({ error: "Credenciales inválidas" });
         }
+    } catch (e) { res.status(500).json({ error: "Error en el servidor" }); }
+});
+
+// NUEVO ENDPOINT: Actualizar gustos del usuario
+app.post('/api/customer/update-tastes', async (req, res) => {
+    const { phone, tastes } = req.body;
+    if (!phone || !tastes) return res.status(400).json({ error: "Faltan datos" });
+    
+    try {
+        await Customer.findOneAndUpdate({ phone }, { tastes });
+        res.json({ success: true });
     } catch (e) {
-        console.error("❌ Error IA:", e.message);
-        res.status(500).json({ error: e.message });
+        console.error("Error guardando gustos:", e);
+        res.status(500).json({ error: "Error actualizando preferencias" });
     }
 });
 

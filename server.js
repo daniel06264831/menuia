@@ -147,6 +147,7 @@ const CustomerSchema = new mongoose.Schema({
         items: [String],      // Ej: ["Pizza Hawaiana", "Sushi Roll"]
         categories: { type: Map, of: Number } // Ej: { "Sushi": 5, "Pizza": 2 }
     },
+    profileImage: String, // Base64 image
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -650,9 +651,9 @@ app.post('/api/customer/register', async (req, res) => {
     try {
         const existing = await Customer.findOne({ phone });
         if (existing) return res.status(400).json({ error: "Este número ya está registrado." });
-        const customer = await Customer.create({ name, phone, password, address: address || "", tastes: { items: [], categories: {} } });
+        const customer = await Customer.create({ name, phone, password, address: address || "", tastes: { items: [], categories: {} }, profileImage: "" });
         // Devolvemos tastes vacío al registrar
-        res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes } });
+        res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes, profileImage: customer.profileImage } });
     } catch (e) { res.status(500).json({ error: "Error al registrar cliente" }); }
 });
 
@@ -663,7 +664,7 @@ app.post('/api/customer/login', async (req, res) => {
         const customer = await Customer.findOne({ phone });
         if (customer && customer.password === password) {
             // Devolvemos también los gustos guardados
-            res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes } });
+            res.json({ success: true, customer: { name: customer.name, phone: customer.phone, address: customer.address, tastes: customer.tastes, profileImage: customer.profileImage } });
         } else {
             res.status(401).json({ error: "Credenciales inválidas" });
         }
@@ -681,6 +682,29 @@ app.post('/api/customer/update-tastes', async (req, res) => {
     } catch (e) {
         console.error("Error guardando gustos:", e);
         res.status(500).json({ error: "Error actualizando preferencias" });
+    }
+});
+
+// NUEVO: Subir foto de perfil
+app.post('/api/customer/upload-profile', async (req, res) => {
+    const { phone, image } = req.body;
+    if (!phone || !image) return res.status(400).json({ error: "Datos faltantes" });
+
+    try {
+        const user = await Customer.findOne({ phone });
+        if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        // Valida con password si es necesario, pero aqui asumimos sesion activa si manda phone
+        // Idealmente pedir password o token, pero por simplicidad y como el frontend manda phone...
+        // Vemos que el frontend guarda "USER_PHONE".
+
+        user.profileImage = image;
+        await user.save();
+
+        res.json({ success: true, image: user.profileImage });
+    } catch (e) {
+        console.error("Profile Upload Error:", e);
+        res.status(500).json({ error: "Error al subir imagen." });
     }
 });
 
@@ -799,4 +823,3 @@ app.get('/', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
-

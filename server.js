@@ -321,28 +321,43 @@ app.post('/api/ai/generate', async (req, res) => {
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
         async function callGemini(model) {
+            // Log para debuggear 404
+            console.log(`🤖 Intentando modelo: ${model}`);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+
             const r = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
             });
-            if (!r.ok) throw new Error(`Model ${model} failed: ${r.status}`);
+
+            if (!r.ok) {
+                // Si es 404, es muy probable que el nombre del modelo esté mal o la API Key no tenga acceso a este modelo específico
+                const txt = await r.text();
+                throw new Error(`Model ${model} failed (${r.status}): ${txt}`);
+            }
             return r;
         }
 
         let response;
         try {
-            // Intento 1: Modelo "Pro" 1.5 solicitado
-            response = await callGemini('gemini-1.5-pro');
+            // Intento 1: Modelo SOLICITADO POR USUARIO (gemini-2.5-flash)
+            // Si el usuario tiene acceso a este modelo específico, funcionará.
+            response = await callGemini('gemini-2.5-flash');
         } catch (e) {
-            console.warn("⚠️ Fallback: Gemini 1.5-pro failed, switching to 1.5-flash.");
+            console.warn(`⚠️ Fallback: gemini-2.5-flash falló (${e.message}). Intentando 1.5-pro...`);
             try {
-                // Intento 2: Modelo Estándar (Fallback)
-                response = await callGemini('gemini-1.5-flash');
+                // Intento 2: Gemini 1.5 Pro (Fallback potente)
+                response = await callGemini('gemini-1.5-pro');
             } catch (e2) {
-                console.error("❌ Ambos modelos fallaron:", e2);
-                return res.status(503).json({ error: "Lo siento, mi cerebro IA está un poco saturado ahora. Intenta en unos segundos." });
+                console.warn(`⚠️ Fallback: 1.5-pro falló (${e2.message}). Intentando flash...`);
+                try {
+                    // Intento 3: Gemini 1.5 Flash (Fallback rápido)
+                    response = await callGemini('gemini-1.5-flash');
+                } catch (e3) {
+                    console.error("❌ Todos los modelos fallaron.", e3);
+                    return res.status(503).json({ error: "No pudimos conectar con nigún modelo de IA. Verifica tu API Key y acceso a modelos." });
+                }
             }
         }
 

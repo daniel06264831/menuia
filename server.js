@@ -779,7 +779,15 @@ app.post('/api/analytics/summary', async (req, res) => {
 
 app.get('/api/shops/public', async (req, res) => {
     try {
-        const shops = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
+        const shopsRaw = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
+
+        // Mocking Popularity/Ratings for "Trending" feature since we don't have real reviews yet
+        const shops = shopsRaw.map(s => ({
+            ...s,
+            rating: (Math.random() * (5.0 - 4.2) + 4.2).toFixed(1), // Random 4.2 - 5.0
+            reviewCount: Math.floor(Math.random() * 500) + 50
+        }));
+
         res.json({ success: true, shops });
     } catch (e) { res.status(500).json({ error: "Error al obtener tiendas" }); }
 });

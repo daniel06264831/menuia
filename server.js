@@ -21,6 +21,12 @@ const server = http.createServer(app);
 app.use(cors());
 app.use(bodyParser.json());
 
+// LOGGING MIDDLEWARE - Para debugging en Render
+app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+    next();
+});
+
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -314,10 +320,6 @@ app.post('/api/ai/generate', async (req, res) => {
 
         console.log(`🤖 Enviando petición a Gemini (${task})...`);
 
-        let modelName = 'gemini-2.0-flash-exp'; // Assuming user meant the latest experimental. Original "2.5" is likely a typo/internal name, but I will try what they asked or close to it.
-        // User insists on "2.5", let's try exactly what was there, or 'gemini-2.0-flash-exp' if 2.5 doesn't exist.
-        // Let's use a variable to make this retryable.
-
         async function callGemini(model) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
             const r = await fetch(url, {
@@ -331,10 +333,10 @@ app.post('/api/ai/generate', async (req, res) => {
 
         let response;
         try {
-            // Intento 1: Modelo "Pro" solicitado
-            response = await callGemini('gemini-2.5-flash');
+            // Intento 1: Modelo "Pro" 1.5 solicitado
+            response = await callGemini('gemini-1.5-pro');
         } catch (e) {
-            console.warn("⚠️ Fallback: Gemini 2.5 failed, switching to 1.5-flash.");
+            console.warn("⚠️ Fallback: Gemini 1.5-pro failed, switching to 1.5-flash.");
             try {
                 // Intento 2: Modelo Estándar (Fallback)
                 response = await callGemini('gemini-1.5-flash');
@@ -872,4 +874,3 @@ app.get('/', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
-

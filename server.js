@@ -17,6 +17,10 @@ try {
 const app = express();
 const server = http.createServer(app);
 
+// MIDDLEWARE GLOBAL
+app.use(cors());
+app.use(bodyParser.json());
+
 const io = new Server(server, {
     cors: {
         origin: "*",

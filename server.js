@@ -270,7 +270,7 @@ app.post('/api/ai/generate', async (req, res) => {
     // Construcción del Prompt
     let prompt = "";
     if (task === 'product_description') {
-        prompt = `Eres un experto copywriter gastronómico. Escribe una descripción corta, apetitosa y atractiva (máximo 30 palabras) para un producto llamado "${context.productName}". Usa emojis relevantes.`;
+        prompt = `Eres un experto copywriter de ventas. Escribe una descripción corta, atractiva y persuasiva (máximo 30 palabras) para un producto llamado "${context.productName}". Ajusta el tono según el producto (si es comida, apetitoso; si es farmacia, confiable; etc.). Usa emojis.`;
     } else if (task === 'business_insight') {
         prompt = `Actúa como un consultor de negocios experto. Analiza estas estadísticas breves: ${JSON.stringify(context.stats)} para un negocio de tipo "${context.businessType}". Dame UN solo consejo estratégico, breve y accionable (máximo 20 palabras) para mejorar ventas hoy.`;
     } else if (task === 'social_post') {
@@ -278,29 +278,36 @@ app.post('/api/ai/generate', async (req, res) => {
     } else if (task === 'optimize_hours') {
         prompt = `Para un negocio de tipo "${context.businessType}", sugiere un horario de apertura y cierre óptimo basado en estándares de la industria. Responde SOLAMENTE con un objeto JSON válido en este formato exacto, sin markdown ni explicaciones: {"open": 9, "close": 23}`;
     } else if (task === 'chef_chat') {
-        // --- NUEVO TASK: CHAT DE CHEF PARA EL MENÚ ---
-        // Contexto esperado: context.menu (array de items simplificados), context.userMsg
+        // --- NUEVO TASK: ASISTENTE DE TIENDA (Multigiro) ---
+        const bType = context.businessType || 'Restaurante';
+        const isFood = bType.toLowerCase().includes('comida') || bType.toLowerCase().includes('restaurante') || bType.toLowerCase().includes('sushi') || bType.toLowerCase().includes('pizza');
+
+        let persona = isFood
+            ? 'Eres un "Mesero Virtual" súper amable y carismático 🤵. Recomienda platillos deliciosos.'
+            : 'Eres un "Asistente de Tienda" experto y servicial 🏪. Ayuda a encontrar el producto ideal.';
+
         const menuSummary = (context.menu || []).map(i => `${i.name} ($${i.price})`).join(', ');
         prompt = `
-        Eres un "Mesero Virtual" súper amable y carismático 🤵. Habla como una persona real, no como un robot.
-
-        MENÚ DISPONIBLE:
+        ${persona}
+        Giro del Negocio: ${bType}.
+        
+        INVENTARIO / MENÚ DISPONIBLE:
         ${menuSummary}
         
         USUARIO DICE: "${context.userMsg}"
         
         INSTRUCCIONES:
-        1. Responde de forma cálida y natural (como "¡Claro! Te va a encantar...", "Mira, te sugiero...").
-        2. Mantén la respuesta breve (máx 40 palabras).
-        3. Si recomiendas algo, dile por qué está rico (ej. "es una delicia", "muy fresco").
-        4. Usa emojis (🍽️✨).
+        1. Responde de forma cálida y breve (máx 40 palabras).
+        2. Basa tu recomendación SOLO en el inventario disponible arriba.
+        3. Si es comida, menciona el sabor. Si es otro producto, menciona su utilidad.
+        4. Usa emojis.
         `;
     } else if (task === 'marketplace_assistant') {
         const shopsSummary = (context.shops || []).map(s => `- ${s.name} (${s.type})`).join('\n');
         prompt = `
-        Eres un amigo local experto en comida 🗺️. Alguien te pregunta dónde comer. Recomiéndale como si le hablaras a tu mejor amigo.
+        Eres un Guía Local experto 🗺️. Alguien te pregunta dónde comprar o comer.
 
-        TIENDAS DISPONIBLES:
+        COMERCIOS DISPONIBLES:
         ${shopsSummary}
 
         USUARIO DICE: "${context.userMsg}"

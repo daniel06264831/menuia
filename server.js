@@ -272,7 +272,7 @@ app.post('/api/ai/generate', async (req, res) => {
         // Contexto esperado: context.menu (array de items simplificados), context.userMsg
         const menuSummary = (context.menu || []).map(i => `${i.name} ($${i.price})`).join(', ');
         prompt = `
-        Eres un "Mesero Virtual" amable, atento y eficiente de este restaurante. Tu trabajo es ayudar al cliente a elegir qué comer basándote en el menú disponible.
+        Eres un "Mesero Virtual" súper amable y carismático 🤵. Habla como una persona real, no como un robot.
 
         MENÚ DISPONIBLE:
         ${menuSummary}
@@ -280,16 +280,15 @@ app.post('/api/ai/generate', async (req, res) => {
         USUARIO DICE: "${context.userMsg}"
         
         INSTRUCCIONES:
-        1. Responde de forma breve y cordial (máximo 40 palabras).
-        2. Usa un tono de servicio ("Le recomiendo", "¿Desea ordenar?", "Excelente elección").
-        3. Recomienda platillos del menú si es apropiado.
-        4. Usa emojis de servicio 🍽️🤵.
-        5. Si preguntan algo fuera de lugar, redirige amablemente al menú.
+        1. Responde de forma cálida y natural (como "¡Claro! Te va a encantar...", "Mira, te sugiero...").
+        2. Mantén la respuesta breve (máx 40 palabras).
+        3. Si recomiendas algo, dile por qué está rico (ej. "es una delicia", "muy fresco").
+        4. Usa emojis (🍽️✨).
         `;
     } else if (task === 'marketplace_assistant') {
         const shopsSummary = (context.shops || []).map(s => `- ${s.name} (${s.type})`).join('\n');
         prompt = `
-        Eres un "Guía Gastronómico" experto de la ciudad. Tu trabajo es recomendar DÓNDE ir a comer entre las opciones disponibles.
+        Eres un amigo local experto en comida 🗺️. Alguien te pregunta dónde comer. Recomiéndale como si le hablaras a tu mejor amigo.
 
         TIENDAS DISPONIBLES:
         ${shopsSummary}
@@ -297,10 +296,10 @@ app.post('/api/ai/generate', async (req, res) => {
         USUARIO DICE: "${context.userMsg}"
 
         INSTRUCCIONES:
-        1. Tu objetivo es llevar al usuario a una tienda específica.
-        2. Si pide algo (ej. "Pizza"), dile qué tiendas lo venden.
-        3. Sé breve, entusiasta y usa emojis (🗺️🍕).
-        4. No recomiendes cosas que no estén en la lista.
+        1. Responde con naturalidad y entusiasmo (ej. "¡Uff, tienes que ir a...", "Sin duda prueba...").
+        2. Guíalos a una tienda específica de la lista.
+        3. Sé breve y directo.
+        4. Usa emojis divertidos (🌮🔥).
         `;
     } else {
         return res.status(400).json({ error: "Tarea no reconocida" });
@@ -328,14 +327,17 @@ app.post('/api/ai/generate', async (req, res) => {
 
         let response;
         try {
-            // Intento 1: Modelo "Pro" solicitado (User called it 2.5, likely 1.5-pro or 2.0-flash-exp, but I'll try the requested string if valid, or safe default is 1.5-pro for "Pro" plan)
-            // Given user said "2.5", and assuming it worked before, I will try 'gemini-1.5-pro' as the likely high-end equivalent if 2.5 is imaginary, 
-            // OR if they really had 'gemini-2.5-flash' in code (which I removed), I'll try that.
-            // Wait, I saw 'gemini-2.5-flash' in the code I removed. I will try it back.
+            // Intento 1: Modelo "Pro" solicitado
             response = await callGemini('gemini-2.5-flash');
         } catch (e) {
             console.warn("⚠️ Fallback: Gemini 2.5 failed, switching to 1.5-flash.");
-            response = await callGemini('gemini-1.5-flash');
+            try {
+                // Intento 2: Modelo Estándar (Fallback)
+                response = await callGemini('gemini-1.5-flash');
+            } catch (e2) {
+                console.error("❌ Ambos modelos fallaron:", e2);
+                return res.status(503).json({ error: "Lo siento, mi cerebro IA está un poco saturado ahora. Intenta en unos segundos." });
+            }
         }
 
 
@@ -866,3 +868,4 @@ app.get('/', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor MongoDB listo en puerto ${PORT}`); });
+

@@ -108,6 +108,12 @@ const ShopSchema = new mongoose.Schema({
         // Manual Open/Close
         isOpen: { type: Boolean, default: true },
 
+        // Destacado Manualmente (Top Shops)
+        isFeatured: { type: Boolean, default: false },
+
+        // Marca Popular (Carrusel Marcas)
+        isPopularBrand: { type: Boolean, default: false },
+
         shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
         bank: { name: String, clabe: String, owner: String },
         bankDetails: { name: String, clabe: String, owner: String },
@@ -872,7 +878,7 @@ app.post('/api/analytics/summary', async (req, res) => {
 
 app.get('/api/shops/public', async (req, res) => {
     try {
-        const shopsRaw = await Shop.find({}, 'slug config.name config.businessType config.heroImage config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
+        const shopsRaw = await Shop.find({}, 'slug config.name config.businessType config.isFeatured config.isPopularBrand config.heroImage config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
 
         // Mocking Popularity/Ratings for "Trending" feature since we don't have real reviews yet
         const shops = shopsRaw.map(s => ({
@@ -890,9 +896,25 @@ app.post('/api/superadmin/list', async (req, res) => {
     const { masterKey } = req.body;
     if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
     try {
-        const shops = await Shop.find({}, 'slug config.name config.businessType stats subscription updatedAt createdAt credentials.contactPhone').sort({ createdAt: -1 });
+        const shops = await Shop.find({}, 'slug config.name config.businessType config.isFeatured config.isPopularBrand stats subscription updatedAt createdAt credentials.contactPhone').sort({ createdAt: -1 });
         res.json({ success: true, shops });
     } catch (e) { res.status(500).json({ error: "Error interno" }); }
+});
+
+app.post('/api/superadmin/toggle-feature', async (req, res) => {
+    const { masterKey, slug } = req.body;
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
+
+        // Toggle
+        const current = shop.config.isFeatured || false;
+        shop.config.isFeatured = !current;
+        await shop.save();
+
+        res.json({ success: true, isFeatured: shop.config.isFeatured });
+    } catch (e) { res.status(500).json({ error: "Error al actualizar" }); }
 });
 
 app.post('/api/superadmin/approve-payment', async (req, res) => {

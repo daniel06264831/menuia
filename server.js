@@ -131,7 +131,9 @@ const ShopSchema = new mongoose.Schema({
         clasicos: [mongoose.Schema.Types.Mixed],
         extras: [mongoose.Schema.Types.Mixed],
         groups: [mongoose.Schema.Types.Mixed]
-    }
+    },
+    // New Advanced Promotions Module
+    promotions: [mongoose.Schema.Types.Mixed]
 }, { timestamps: true });
 
 const Shop = mongoose.model('Shop', ShopSchema);
@@ -612,6 +614,7 @@ app.post('/api/shop/:slug', async (req, res) => {
 
         shop.config = data.config;
         shop.menu = data.menu;
+        if (data.promotions) shop.promotions = data.promotions;
 
         await shop.save();
 
@@ -879,7 +882,7 @@ app.post('/api/analytics/summary', async (req, res) => {
 
 app.get('/api/shops/public', async (req, res) => {
     try {
-        const shopsRaw = await Shop.find({}, 'slug config.name config.businessType config.isFeatured config.isPopularBrand config.heroImage config.logo config.hours config.address config.coords config.highDemand config.isOpen config.shipping').lean();
+        const shopsRaw = await Shop.find({}, 'slug config.name config.businessType config.isFeatured config.isPopularBrand config.heroImage config.logo config.hours config.address config.coords config.highDemand config.isOpen config.shipping promotions').lean();
 
         // Mocking Popularity/Ratings for "Trending" feature since we don't have real reviews yet
         const shops = shopsRaw.map(s => ({

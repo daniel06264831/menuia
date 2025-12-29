@@ -43,7 +43,7 @@ const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
 // CLAVES API
 // CLAVES API - LIVE KEY PROVIDED BY USER
-const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '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';
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const stripe = require('stripe')(STRIPE_KEY);
 
 app.post('/api/subscription/create-checkout-session', async (req, res) => {

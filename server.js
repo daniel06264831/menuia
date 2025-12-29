@@ -42,7 +42,44 @@ const PORT = process.env.PORT || 3000;
 const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
 // CLAVES API
-const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51SeMjIDaJNbMOGNThpOULS40g4kjVPcrTPagicSbV450bdvVR1QLQZNJWykZuIrBYLJzlxwnqORWTUstVKKYPlDL00kAw1uJfH';
+// CLAVES API - LIVE KEY PROVIDED BY USER
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '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';
+const stripe = require('stripe')(STRIPE_KEY);
+
+app.post('/api/subscription/create-checkout-session', async (req, res) => {
+    try {
+        const { slug } = req.body;
+        if (!slug) return res.status(400).json({ error: "Slug required" });
+
+        const session = await stripe.checkout.sessions.create({
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'mxn',
+                        product_data: {
+                            name: 'Suscripción PRO - MenúIA',
+                            description: 'Acceso total a funciones premium',
+                        },
+                        unit_amount: 10000, // $100.00 MXN
+                    },
+                    quantity: 1,
+                },
+            ],
+            mode: 'payment', // One-time payment for now (or 'subscription' if using recurring Price ID)
+            success_url: `${req.headers.origin}/admin.html?slug=${slug}&session_id={CHECKOUT_SESSION_ID}&payment=success`,
+            cancel_url: `${req.headers.origin}/admin.html?slug=${slug}&payment=cancel`,
+            metadata: {
+                shop_slug: slug,
+                type: 'subscription_pro'
+            }
+        });
+
+        res.json({ url: session.url });
+    } catch (e) {
+        console.error("Stripe Error:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
 
 // ==========================================
 // 🔵 MODO RENDER (VARIABLES DE ENTORNO) 🔵
@@ -53,12 +90,15 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
-// Inicializar Stripe
-let stripe;
-try {
-    stripe = require('stripe')(STRIPE_KEY);
-} catch (e) {
-    console.warn("⚠️ Stripe no se pudo inicializar (Revisar Clave). El resto del servidor funcionará.");
+
+// Inicializar Stripe (Ya inicializado arriba con clave Live)
+// Se mantiene bloque try-catch por si acaso faltara la clave
+if (!stripe) {
+    try {
+        stripe = require('stripe')(STRIPE_KEY);
+    } catch (e) {
+        console.warn("⚠️ Stripe no se pudo inicializar (Revisar Clave).");
+    }
 }
 
 // Validación de Node.js para fetch

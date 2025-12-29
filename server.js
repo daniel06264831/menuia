@@ -98,6 +98,7 @@ const ShopSchema = new mongoose.Schema({
         whatsapp: String,
         businessType: { type: String, default: "Comida General" },
         heroImage: String,
+        logo: String, // Logo del Negocio
         coords: { lat: Number, lng: Number },
         hours: { open: Number, close: Number },
 

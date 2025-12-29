@@ -43,43 +43,9 @@ const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
 // CLAVES API
 // CLAVES API - LIVE KEY PROVIDED BY USER
-const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-const stripe = require('stripe')(STRIPE_KEY);
 
-app.post('/api/subscription/create-checkout-session', async (req, res) => {
-    try {
-        const { slug } = req.body;
-        if (!slug) return res.status(400).json({ error: "Slug required" });
 
-        const session = await stripe.checkout.sessions.create({
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'mxn',
-                        product_data: {
-                            name: 'Suscripción PRO - MenúIA',
-                            description: 'Acceso total a funciones premium',
-                        },
-                        unit_amount: 10000, // $100.00 MXN
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment', // One-time payment for now (or 'subscription' if using recurring Price ID)
-            success_url: `${req.headers.origin}/admin.html?slug=${slug}&session_id={CHECKOUT_SESSION_ID}&payment=success`,
-            cancel_url: `${req.headers.origin}/admin.html?slug=${slug}&payment=cancel`,
-            metadata: {
-                shop_slug: slug,
-                type: 'subscription_pro'
-            }
-        });
 
-        res.json({ url: session.url });
-    } catch (e) {
-        console.error("Stripe Error:", e);
-        res.status(500).json({ error: e.message });
-    }
-});
 
 // ==========================================
 // 🔵 MODO RENDER (VARIABLES DE ENTORNO) 🔵
@@ -91,15 +57,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 
 
-// Inicializar Stripe (Ya inicializado arriba con clave Live)
-// Se mantiene bloque try-catch por si acaso faltara la clave
-if (!stripe) {
-    try {
-        stripe = require('stripe')(STRIPE_KEY);
-    } catch (e) {
-        console.warn("⚠️ Stripe no se pudo inicializar (Revisar Clave).");
-    }
-}
+
 
 // Validación de Node.js para fetch
 if (!globalThis.fetch) {
@@ -121,12 +79,7 @@ const ShopSchema = new mongoose.Schema({
         ownerName: String,
         contactPhone: String
     },
-    subscription: {
-        status: { type: String, default: 'trial' },
-        plan: { type: String, default: 'free' },
-        validUntil: Date,
-        startDate: { type: Date, default: Date.now }
-    },
+
     stats: {
         visits: { type: Number, default: 0 },
         orders: { type: Number, default: 0 },
@@ -609,14 +562,6 @@ app.get('/api/shop/:slug', async (req, res) => {
     try {
         const shop = await Shop.findOne({ slug: req.params.slug }).lean();
         if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
-        const now = new Date();
-        let isExpired = false;
-        if (shop.subscription.status === 'trial' && shop.subscription.validUntil && new Date(shop.subscription.validUntil) < now) {
-            isExpired = true;
-            Shop.updateOne({ _id: shop._id }, { 'subscription.status': 'expired' }).exec();
-        } else if (shop.subscription.status === 'expired') isExpired = true;
-        delete shop.credentials;
-        shop.isExpired = isExpired;
         res.json(shop);
     } catch (e) { res.status(500).json({ error: "Error servidor" }); }
 });

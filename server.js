@@ -913,6 +913,7 @@ app.post('/api/superadmin/toggle-feature', async (req, res) => {
         shop.config.isFeatured = !current;
         await shop.save();
 
+        console.log(`[Socket] Emitting featured update for ${slug}: ${shop.config.isFeatured}`);
         io.emit('shop-config-updated', { slug, type: 'featured', value: shop.config.isFeatured });
 
         res.json({ success: true, isFeatured: shop.config.isFeatured });
@@ -931,6 +932,7 @@ app.post('/api/superadmin/toggle-brand', async (req, res) => {
         shop.config.isPopularBrand = !current;
         await shop.save();
 
+        console.log(`[Socket] Emitting brand update for ${slug}: ${shop.config.isPopularBrand}`);
         io.emit('shop-config-updated', { slug, type: 'brand', value: shop.config.isPopularBrand });
 
         res.json({ success: true, isPopularBrand: shop.config.isPopularBrand });

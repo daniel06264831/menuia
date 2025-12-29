@@ -913,6 +913,8 @@ app.post('/api/superadmin/toggle-feature', async (req, res) => {
         shop.config.isFeatured = !current;
         await shop.save();
 
+        io.emit('shop-config-updated', { slug, type: 'featured', value: shop.config.isFeatured });
+
         res.json({ success: true, isFeatured: shop.config.isFeatured });
     } catch (e) { res.status(500).json({ error: "Error al actualizar" }); }
 });
@@ -928,6 +930,8 @@ app.post('/api/superadmin/toggle-brand', async (req, res) => {
         const current = shop.config.isPopularBrand || false;
         shop.config.isPopularBrand = !current;
         await shop.save();
+
+        io.emit('shop-config-updated', { slug, type: 'brand', value: shop.config.isPopularBrand });
 
         res.json({ success: true, isPopularBrand: shop.config.isPopularBrand });
     } catch (e) { res.status(500).json({ error: "Error al actualizar" }); }

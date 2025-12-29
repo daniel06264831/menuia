@@ -710,6 +710,34 @@ app.post('/api/utils/reverse-geocode', async (req, res) => {
 });
 
 // --- RUTAS NUEVAS: CLIENTES ---
+app.get('/api/customer/orders/:phone', async (req, res) => {
+    const { phone } = req.params;
+    try {
+        const activeOrders = await Order.find({
+            customerPhone: phone,
+            status: { $nin: ['completed', 'cancelled', 'rejected'] }
+        }).sort({ createdAt: -1 });
+
+        // Enrich with Shop Names (Optional, but good for UI)
+        // For performance, we could just return the data as is, or do a quick lookup.
+        // Let's do a quick map if needed, or just rely on 'shopSlug'
+
+        // We will fetch shop names manually to keep it fast
+        const results = await Promise.all(activeOrders.map(async (o) => {
+            const shop = await Shop.findOne({ slug: o.shopSlug }).select('config.name');
+            return {
+                ...o.toObject(),
+                shopName: shop ? shop.config.name : o.shopSlug
+            };
+        }));
+
+        res.json({ success: true, orders: results });
+    } catch (e) {
+        console.error("Error fetching orders:", e);
+        res.status(500).json({ error: "Error al buscar pedidos" });
+    }
+});
+
 app.post('/api/customer/register', async (req, res) => {
     const { name, phone, password, address } = req.body;
     if (!name || !phone || !password) return res.status(400).json({ error: "Faltan datos requeridos" });

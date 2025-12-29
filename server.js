@@ -917,6 +917,22 @@ app.post('/api/superadmin/toggle-feature', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error al actualizar" }); }
 });
 
+app.post('/api/superadmin/toggle-brand', async (req, res) => {
+    const { masterKey, slug } = req.body;
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+    try {
+        const shop = await Shop.findOne({ slug });
+        if (!shop) return res.status(404).json({ error: "Tienda no encontrada" });
+
+        // Toggle
+        const current = shop.config.isPopularBrand || false;
+        shop.config.isPopularBrand = !current;
+        await shop.save();
+
+        res.json({ success: true, isPopularBrand: shop.config.isPopularBrand });
+    } catch (e) { res.status(500).json({ error: "Error al actualizar" }); }
+});
+
 app.post('/api/superadmin/approve-payment', async (req, res) => {
     const { masterKey, slug, months } = req.body;
     if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });

@@ -120,7 +120,14 @@ const ShopSchema = new mongoose.Schema({
         // Marca Popular (Carrusel Marcas)
         isPopularBrand: { type: Boolean, default: false },
 
-        shipping: { freeThreshold: Number, freeKm: Number, maxRadius: Number, costPerKm: Number },
+        shipping: {
+            freeShippingActive: { type: Boolean, default: false },
+            freeShippingThreshold: { type: Number, default: 0 },
+            freeThreshold: Number, // Legacy support if needed, but primary is freeShippingThreshold
+            freeKm: Number,
+            maxRadius: Number,
+            costPerKm: Number
+        },
         bank: { name: String, clabe: String, owner: String },
         bankDetails: { name: String, clabe: String, owner: String },
         categoryTitles: {

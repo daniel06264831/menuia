@@ -137,13 +137,7 @@ const ShopSchema = new mongoose.Schema({
             extras: { type: String, default: "🥤 Bebidas y Otros" }
         }
     },
-    menu: {
-        promos: [mongoose.Schema.Types.Mixed],
-        especiales: [mongoose.Schema.Types.Mixed],
-        clasicos: [mongoose.Schema.Types.Mixed],
-        extras: [mongoose.Schema.Types.Mixed],
-        groups: [mongoose.Schema.Types.Mixed]
-    },
+    menu: { type: mongoose.Schema.Types.Mixed, default: {} },
     // New Advanced Promotions Module
     promotions: [mongoose.Schema.Types.Mixed]
 }, { timestamps: true });

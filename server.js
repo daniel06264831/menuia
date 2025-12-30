@@ -15,10 +15,17 @@ try {
 }
 
 const app = express();
+// Confía en el proxy de Render/Cloudflare para obtener la IP real
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 
 // MIDDLEWARE GLOBAL
-app.use(cors());
+app.use(cors({
+    origin: '*', // Permite conexiones desde tu hosting y localhost
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(bodyParser.json());
 
 // LOGGING MIDDLEWARE - Para debugging en Render

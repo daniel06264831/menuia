@@ -809,17 +809,68 @@ app.post('/api/customer/upload-profile', async (req, res) => {
 });
 
 // --- RUTAS STRIPE ---
-app.post('/api/create-payment-intent', async (req, res) => {
-    const { amount, currency } = req.body; // amount in cents
+app.post('/api/create-checkout-session', async (req, res) => {
+    const { items, slug, userPhone } = req.body;
+
     try {
-        const paymentIntent = await stripe.paymentIntents.create({
-            amount,
-            currency: currency || 'mxn',
-            automatic_payment_methods: { enabled: true },
+        // Transform CART items to Stripe Line Items
+        const line_items = items.map(item => ({
+            price_data: {
+                currency: 'mxn',
+                product_data: {
+                    name: item.name,
+                    images: item.image ? [item.image] : [],
+                },
+                unit_amount: Math.round(item.price * 100), // cents
+            },
+            quantity: item.qty,
+        }));
+
+        // Add Delivery Fee (Hardcoded for now as per frontend)
+        line_items.push({
+            price_data: {
+                currency: 'mxn',
+                product_data: { name: 'Tarifa de entrega' },
+                unit_amount: 5200, // $52.00
+            },
+            quantity: 1,
         });
-        res.json({ clientSecret: paymentIntent.client_secret });
+
+        // Add Service Fee
+        line_items.push({
+            price_data: {
+                currency: 'mxn',
+                product_data: { name: 'Tarifa de servicio' },
+                unit_amount: 600, // $6.00
+            },
+            quantity: 1,
+        });
+
+        // Add Tip (Simplification: Fixed logic or passed from frontend would be better, 
+        // but for checkout session limitation we might rely on Total)
+        // NOTE: For exact total matching, passing the full amount as a custom SKU is another option,
+        // but itemized is better for UX. Given the complexity of tips/discounts, 
+        // we'll use a single custom line item for the "Total a Pagar" to avoid mismatch.
+
+        const finalLineItems = [{
+            price_data: {
+                currency: 'mxn',
+                product_data: { name: `Pedido en ${slug}` },
+                unit_amount: Math.round(req.body.total * 100), // Total from Frontend
+            },
+            quantity: 1,
+        }];
+
+        const session = await stripe.checkout.sessions.create({
+            line_items: finalLineItems, // Using single item for total exact match
+            mode: 'payment',
+            success_url: `https://menuia.onrender.com/menu.html?slug=${slug}&status=success&ref=${Date.now()}`,
+            cancel_url: `https://menuia.onrender.com/menu.html?slug=${slug}&status=cancel`,
+        });
+
+        res.json({ url: session.url });
     } catch (e) {
-        console.error("Stripe Error:", e);
+        console.error("Stripe Checkout Error:", e);
         res.status(500).json({ error: e.message });
     }
 });

@@ -55,6 +55,8 @@ const SUPER_ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
 
 
@@ -795,6 +797,22 @@ app.post('/api/customer/upload-profile', async (req, res) => {
     } catch (e) {
         console.error("Profile Upload Error:", e);
         res.status(500).json({ error: "Error al subir imagen." });
+    }
+});
+
+// --- RUTAS STRIPE ---
+app.post('/api/create-payment-intent', async (req, res) => {
+    const { amount, currency } = req.body; // amount in cents
+    try {
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount,
+            currency: currency || 'mxn',
+            automatic_payment_methods: { enabled: true },
+        });
+        res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (e) {
+        console.error("Stripe Error:", e);
+        res.status(500).json({ error: e.message });
     }
 });
 

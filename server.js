@@ -94,6 +94,7 @@ const ShopSchema = new mongoose.Schema({
         logo: String, // Logo del Negocio
         coords: { lat: Number, lng: Number },
         hours: { open: Number, close: Number },
+        prepTime: { type: String, default: "30-45 min" },
 
         // Alta Demanda
         highDemand: { type: Boolean, default: false },
@@ -419,6 +420,7 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
             heroImage: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=1000",
             coords: { "lat": 20.648325, "lng": -103.267706 },
             hours: { "open": 9, "close": 23 },
+            prepTime: "30-45 min",
             shipping: { "freeThreshold": 500, "freeKm": 2.0, "maxRadius": 5.0, "costPerKm": 10 },
             bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name },
             highDemand: false,

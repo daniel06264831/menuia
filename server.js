@@ -63,6 +63,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://daniel:daniel25@capacitacion.nxd7yl9.mongodb.net/?retryWrites=true&w=majority&appName=capacitacion&authSource=admin";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+if (!STRIPE_SECRET_KEY) console.error("⚠️ FATAL: STRIPE_SECRET_KEY no está definida en las variables de entorno.");
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
 

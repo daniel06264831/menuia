@@ -130,6 +130,17 @@ const ShopSchema = new mongoose.Schema({
         },
         bank: { name: String, clabe: String, owner: String },
         bankDetails: { name: String, clabe: String, owner: String },
+        // NEW: Dynamic Categories List
+        categories: {
+            type: [
+                {
+                    id: String,
+                    name: String,
+                    isDefault: { type: Boolean, default: false }
+                }
+            ],
+            default: []
+        },
         categoryTitles: {
             promos: { type: String, default: "🔥 Promociones" },
             especiales: { type: String, default: "⭐ Recomendados" },
@@ -187,7 +198,7 @@ app.use(bodyParser.json({ limit: '50mb' }));
 // app.use(express.static(path.join(__dirname, 'public')));
 // app.use(express.static(__dirname));
 
-// --- HELPERS STATS DIARIOS ---
+// --- HELPERS stats DIARIOS ---
 const checkDailyReset = (shop) => {
     const today = new Date().toLocaleDateString('en-CA');
     if (shop.stats.lastReset !== today) {
@@ -430,6 +441,7 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
         config: {
             name, address, whatsapp, businessType,
             heroImage: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=1000",
+            logo: "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
             coords: { "lat": 20.648325, "lng": -103.267706 },
             hours: { "open": 9, "close": 23 },
             prepTime: "30-45 min",
@@ -437,7 +449,20 @@ const getTemplateShop = (slug, name, owner, phone, address, whatsapp, password, 
             bank: { "name": "Banco", "clabe": "000000000000000000", "owner": name },
             highDemand: false,
             highDemandTime: "",
-            isOpen: true
+            isOpen: true,
+            // DEFAULT CATEGORIES
+            categories: [
+                { id: 'promos', name: '🔥 Promociones', isDefault: true },
+                { id: 'especiales', name: '⭐ Recomendados', isDefault: true },
+                { id: 'clasicos', name: '🍽️ Menú Principal', isDefault: true },
+                { id: 'extras', name: '🥤 Bebidas y Otros', isDefault: true }
+            ],
+            categoryTitles: {
+                promos: "🔥 Promociones",
+                especiales: "⭐ Recomendados",
+                clasicos: "🍽️ Menú Principal",
+                extras: "🥤 Bebidas y Otros"
+            }
         },
         menu: { promos: [], especiales: [], clasicos: [], extras: [], groups: [] }
     };

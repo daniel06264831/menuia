@@ -160,11 +160,20 @@ const OrderSchema = new mongoose.Schema({
     shopSlug: { type: String, required: true, index: true },
     dailyId: { type: Number, default: 0 },
     ref: String,
+    customerName: String, // NEW
     customerPhone: String,
     address: String,
+    note: String, // NEW: Delivery Note
     paymentMethod: String,
     type: String,
     items: [mongoose.Schema.Types.Mixed],
+    costs: { // NEW: Financial Breakdown
+        subtotal: Number,
+        tip: Number,
+        shipping: Number,
+        service: Number,
+        total: Number
+    },
     total: String,
     status: { type: String, default: 'pending' },
     createdAt: { type: Date, default: Date.now }
@@ -260,11 +269,14 @@ io.on('connection', (socket) => {
                         shopSlug: slug,
                         dailyId: countToday + 1,
                         ref: orderData.ref,
+                        customerName: orderData.customerName || 'Cliente', // NEW
                         customerPhone: orderData.customerPhone,
                         address: orderData.address,
+                        note: orderData.note || '', // NEW
                         paymentMethod: orderData.paymentMethod,
                         type: orderData.type || 'llevar',
                         items: orderData.items,
+                        costs: orderData.costs || {}, // NEW
                         total: orderData.total,
                         status: orderData.status || 'pending',
                         createdAt: new Date()

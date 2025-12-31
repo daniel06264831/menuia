@@ -249,6 +249,18 @@ io.on('connection', (socket) => {
         }
 
         try {
+            // RULE: Limit 1 Active Cash Order
+            if (orderData && orderData.paymentMethod === 'Efectivo') {
+                const activeCash = await Order.countDocuments({
+                    customerPhone: orderData.customerPhone,
+                    status: { $nin: ['completed', 'cancelled', 'rejected'] },
+                    paymentMethod: 'Efectivo'
+                });
+                if (activeCash >= 1) {
+                    return socket.emit('order-error', { message: "❌ Ya tienes un pedido en Efectivo activo. Espera a que finalice." });
+                }
+            }
+
             let shop = await Shop.findOne({ slug });
             if (shop) {
                 checkDailyReset(shop);
@@ -850,6 +862,23 @@ app.post('/api/customer/upload-profile', async (req, res) => {
 // --- RUTAS STRIPE ---
 app.post('/api/create-checkout-session', async (req, res) => {
     const { items, slug, userPhone } = req.body;
+
+    // RULE: Limit 1 Active Card Order
+    try {
+        const activeCard = await Order.countDocuments({
+            customerPhone: userPhone,
+            status: { $nin: ['completed', 'cancelled', 'rejected'] },
+            paymentMethod: 'Tarjeta' // Matches DB field from Stripe successes usually logic flow needs care
+        });
+        // Note: Stripe orders created via webhook usually get 'Tarjeta'. 
+        // We check if *user* has pending ones. 
+        // Actually, if status is pending_payment it might not be in DB yet? 
+        // Usually we create DB record after webhook success.
+        // BUT, if user has an active order (Preparing/Delivering) with Card, block new one.
+        if (activeCard >= 1) {
+            return res.status(400).json({ error: "❌ Ya tienes un pedido con Tarjeta activo. Espera a que finalice." });
+        }
+    } catch (e) { console.log(e); }
 
     try {
         // Transform CART items to Stripe Line Items

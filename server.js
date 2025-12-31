@@ -269,14 +269,14 @@ io.on('connection', (socket) => {
                         shopSlug: slug,
                         dailyId: countToday + 1,
                         ref: orderData.ref,
-                        customerName: orderData.customerName || 'Cliente', // NEW
-                        customerPhone: orderData.customerPhone,
+                        customerName: orderData.customerName || 'Cliente',
+                        customerPhone: orderData.customerPhone || '5500000000',
                         address: orderData.address,
-                        note: orderData.note || '', // NEW
-                        paymentMethod: orderData.paymentMethod,
-                        type: orderData.type || 'llevar',
+                        note: orderData.note || '',
+                        paymentMethod: orderData.paymentMethod || 'Efectivo',
+                        type: orderData.type || 'delivery',
                         items: orderData.items,
-                        costs: orderData.costs || {}, // NEW
+                        costs: orderData.costs || {},
                         total: orderData.total,
                         status: orderData.status || 'pending',
                         createdAt: new Date()

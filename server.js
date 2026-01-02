@@ -368,6 +368,15 @@ io.on('connection', (socket) => {
                 socket.emit('new-request', o);
             });
 
+            // CHECK & SEND ACTIVE ORDER (Persistence Fix)
+            const activeOrder = await Order.findOne({
+                driverId: driver._id,
+                status: { $in: ['driver_assigned', 'to_store', 'at_store', 'on_way'] }
+            });
+            if (activeOrder) {
+                socket.emit('order-accepted', activeOrder);
+            }
+
         } else {
             socket.emit('login-failed');
         }
@@ -382,6 +391,15 @@ io.on('connection', (socket) => {
         pendingOrders.forEach(o => {
             socket.emit('new-request', o);
         });
+
+        // CHECK & SEND ACTIVE ORDER (Persistence Fix)
+        const activeOrder = await Order.findOne({
+            driverId: driverId,
+            status: { $in: ['driver_assigned', 'to_store', 'at_store', 'on_way'] }
+        });
+        if (activeOrder) {
+            socket.emit('order-accepted', activeOrder);
+        }
     });
 
     socket.on('driver-offline', async (driverId) => {
@@ -393,7 +411,23 @@ io.on('connection', (socket) => {
         await DeliveryPartner.findByIdAndUpdate(driverId, {
             currentLocation: { lat, lng, updatedAt: new Date() }
         });
-        // Optional: Broadcast to admin/user tracking this driver
+
+        // Broadcast to Client tracking this driver
+        // Find active order for this driver
+        const activeOrder = await Order.findOne({
+            driverId: driverId,
+            status: { $in: ['driver_assigned', 'on_way', 'to_store', 'at_store'] },
+            deliveryStatus: { $ne: 'delivered' }
+        });
+
+        if (activeOrder) {
+            io.to(activeOrder.shopSlug).emit('driver-moved', {
+                orderId: activeOrder._id,
+                driverId,
+                lat,
+                lng
+            });
+        }
     });
 
     socket.on('accept-order', async ({ driverId, orderId }) => {

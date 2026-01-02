@@ -322,6 +322,15 @@ io.on('connection', (socket) => {
                     // Broadcast to Drivers if Delivery
                     if (newOrder.type === 'delivery') {
                         io.to('drivers').emit('new-request', newOrder);
+
+                        // RE-BROADCAST TIMER (2 Minutes)
+                        setTimeout(async () => {
+                            const checkOrder = await Order.findById(newOrder._id);
+                            if (checkOrder && checkOrder.deliveryStatus === 'pending_assignment' && checkOrder.status !== 'cancelled') {
+                                console.log(`🔄 Re-broadcasting Order ${checkOrder.ref} to drivers`);
+                                io.to('drivers').emit('new-request', checkOrder);
+                            }
+                        }, 120000); // 2 minutes
                     }
 
                     io.to(slug).emit('new-order-saved');
@@ -398,6 +407,9 @@ io.on('connection', (socket) => {
             // Notify Shop
             io.to(order.shopSlug).emit('order-update', order);
             io.to(order.shopSlug).emit('driver-assigned', { orderId, driverName: driver.name });
+
+            // Notify ALL drivers to remove the request
+            socket.to('drivers').emit('order-taken', { message: 'Pedido tomado por otro conductor', orderId });
             // Notify User (future implementation via socket room for user)
         } else {
             socket.emit('order-taken', { message: "Esta orden ya fue tomada por otro repartidor." });

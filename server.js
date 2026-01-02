@@ -181,6 +181,8 @@ const OrderSchema = new mongoose.Schema({
     driverName: String,
     driverPhone: String,
     deliveryStatus: { type: String, default: 'pending_assignment' }, // pending_assignment, to_store, at_store, on_way, delivered
+    shopCoords: { lat: Number, lng: Number },
+    shopName: String,
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -307,13 +309,19 @@ io.on('connection', (socket) => {
                         ref: orderData.ref,
                         customerName: orderData.customerName || 'Cliente',
                         customerPhone: orderData.customerPhone || '5500000000',
+                        shopName: shop.config.name, // Helpful for UI
+                        shopCoords: shop.config.coords, // CRITICAL FOR DISTANCE
                         address: orderData.address,
                         note: orderData.note || '',
                         paymentMethod: orderData.paymentMethod || 'Efectivo',
                         type: orderData.type || 'delivery',
                         items: orderData.items,
-                        costs: orderData.costs || {},
+                        paymentMethod: orderData.paymentMethod || 'Efectivo',
+                        type: orderData.type || 'delivery',
+                        items: orderData.items,
+                        costs: orderData.costs || { subtotal: 0, tip: 0, shipping: 35, total: orderData.total }, // Ensure structure
                         total: orderData.total,
+                        status: orderData.status || 'pending',
                         status: orderData.status || 'pending',
                         deliveryStatus: 'pending_assignment', // Default for new orders
                         createdAt: new Date()
@@ -433,6 +441,20 @@ io.on('connection', (socket) => {
             // Notify Driver (confirmation)
             socket.emit('order-step-updated', { orderId, step });
         }
+    });
+
+    socket.on('get-driver-history', async (driverId) => {
+        try {
+            // Fetch last 50 completed orders
+            const history = await Order.find({
+                driverId: driverId,
+                status: { $in: ['completed'] }
+            })
+                .sort({ createdAt: -1 })
+                .limit(50);
+
+            socket.emit('driver-history-data', history);
+        } catch (e) { console.error(e); }
     });
 });
 

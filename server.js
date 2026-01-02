@@ -176,6 +176,11 @@ const OrderSchema = new mongoose.Schema({
     },
     total: String,
     status: { type: String, default: 'pending' },
+    // DRIVER INFO
+    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryPartner' },
+    driverName: String,
+    driverPhone: String,
+    deliveryStatus: { type: String, default: 'pending_assignment' }, // pending_assignment, to_store, at_store, on_way, delivered
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -197,6 +202,24 @@ const CustomerSchema = new mongoose.Schema({
 });
 
 const Customer = mongoose.model('Customer', CustomerSchema);
+
+// 4. Schema Repartidores (Drivers)
+const DeliveryPartnerSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    phone: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    vehicle: { type: String, default: 'Moto' }, // Moto, Bici, Auto
+    status: { type: String, default: 'offline' }, // offline, online, busy
+    currentLocation: {
+        lat: Number,
+        lng: Number,
+        updatedAt: Date
+    },
+    earnings: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const DeliveryPartner = mongoose.model('DeliveryPartner', DeliveryPartnerSchema);
 
 
 app.use(cors());
@@ -272,6 +295,7 @@ io.on('connection', (socket) => {
                     const startOfDay = new Date();
                     startOfDay.setHours(0, 0, 0, 0);
 
+
                     const countToday = await Order.countDocuments({
                         shopSlug: slug,
                         createdAt: { $gte: startOfDay }
@@ -291,8 +315,14 @@ io.on('connection', (socket) => {
                         costs: orderData.costs || {},
                         total: orderData.total,
                         status: orderData.status || 'pending',
+                        deliveryStatus: 'pending_assignment', // Default for new orders
                         createdAt: new Date()
                     });
+
+                    // Broadcast to Drivers if Delivery
+                    if (newOrder.type === 'delivery') {
+                        io.to('drivers').emit('new-request', newOrder);
+                    }
 
                     io.to(slug).emit('new-order-saved');
                     io.to(slug).emit('order-created-client', newOrder);
@@ -305,6 +335,80 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => { });
+
+    // --- DRIVER SOCKET EVENTS ---
+    socket.on('driver-login', async (data) => {
+        const { phone, password } = data;
+        const driver = await DeliveryPartner.findOne({ phone, password });
+        if (driver) {
+            socket.join('drivers'); // General room for broadcasting available orders
+            socket.join(`driver_${driver._id}`); // Private room
+            socket.emit('login-success', driver);
+        } else {
+            socket.emit('login-failed');
+        }
+    });
+
+    socket.on('driver-online', async (driverId) => {
+        await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'online' });
+        socket.join('drivers');
+    });
+
+    socket.on('driver-offline', async (driverId) => {
+        await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'offline' });
+        socket.leave('drivers');
+    });
+
+    socket.on('driver-location', async ({ driverId, lat, lng }) => {
+        await DeliveryPartner.findByIdAndUpdate(driverId, {
+            currentLocation: { lat, lng, updatedAt: new Date() }
+        });
+        // Optional: Broadcast to admin/user tracking this driver
+    });
+
+    socket.on('accept-order', async ({ driverId, orderId }) => {
+        // Atomic check to prevent double booking
+        const order = await Order.findOne({ _id: orderId, driverId: { $exists: false } });
+        if (order) {
+            const driver = await DeliveryPartner.findById(driverId);
+            order.driverId = driverId;
+            order.driverName = driver.name;
+            order.driverPhone = driver.phone;
+            order.deliveryStatus = 'to_store';
+            order.status = 'driver_assigned'; // Update main status too so Shop sees it
+            await order.save();
+
+            await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'busy' });
+
+            // Notify Driver
+            socket.emit('order-accepted', order);
+            // Notify Shop
+            io.to(order.shopSlug).emit('order-update', order);
+            io.to(order.shopSlug).emit('driver-assigned', { orderId, driverName: driver.name });
+            // Notify User (future implementation via socket room for user)
+        } else {
+            socket.emit('order-taken', { message: "Esta orden ya fue tomada por otro repartidor." });
+        }
+    });
+
+    socket.on('update-order-step', async ({ orderId, step }) => {
+        // step: 'at_store', 'on_way', 'delivered'
+        const order = await Order.findById(orderId);
+        if (order) {
+            order.deliveryStatus = step;
+            if (step === 'delivered') {
+                order.status = 'completed';
+                await DeliveryPartner.findByIdAndUpdate(order.driverId, { status: 'online', $inc: { earnings: 35 } }); // Mock earning
+            }
+            await order.save();
+
+            // Notify Shop
+            io.to(order.shopSlug).emit('order-update', order);
+
+            // Notify Driver (confirmation)
+            socket.emit('order-step-updated', { orderId, step });
+        }
+    });
 });
 
 // --- API IA (GOOGLE GEMINI) ---
@@ -820,6 +924,35 @@ app.post('/api/customer/login', async (req, res) => {
             res.status(401).json({ error: "Credenciales inválidas" });
         }
     } catch (e) { res.status(500).json({ error: "Error en el servidor" }); }
+});
+
+// --- RUTAS REPARTIDORES (DRIVERS) ---
+app.post('/api/driver/register', async (req, res) => {
+    const { name, phone, password, vehicle } = req.body;
+    if (!name || !phone || !password) return res.status(400).json({ error: "Datos incompletos" });
+    try {
+        const existing = await DeliveryPartner.findOne({ phone });
+        if (existing) return res.status(400).json({ error: "Ya existe un repartidor con este teléfono." });
+
+        await DeliveryPartner.create({ name, phone, password, vehicle });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: "Error al registrar repartidor." });
+    }
+});
+
+app.post('/api/driver/login', async (req, res) => {
+    const { phone, password } = req.body;
+    try {
+        const driver = await DeliveryPartner.findOne({ phone });
+        if (driver && driver.password === password) {
+            res.json({ success: true, driver });
+        } else {
+            res.status(401).json({ error: "Credenciales inválidas" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: "Error servidor" });
+    }
 });
 
 // NUEVO ENDPOINT: Actualizar gustos del usuario

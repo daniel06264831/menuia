@@ -344,6 +344,13 @@ io.on('connection', (socket) => {
             socket.join('drivers'); // General room for broadcasting available orders
             socket.join(`driver_${driver._id}`); // Private room
             socket.emit('login-success', driver);
+
+            // Send any pending orders immediately
+            const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
+            pendingOrders.forEach(o => {
+                socket.emit('new-request', o);
+            });
+
         } else {
             socket.emit('login-failed');
         }
@@ -352,6 +359,12 @@ io.on('connection', (socket) => {
     socket.on('driver-online', async (driverId) => {
         await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'online' });
         socket.join('drivers');
+
+        // Send pending orders to this driver who just came online
+        const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
+        pendingOrders.forEach(o => {
+            socket.emit('new-request', o);
+        });
     });
 
     socket.on('driver-offline', async (driverId) => {

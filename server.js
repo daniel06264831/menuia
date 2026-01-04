@@ -210,6 +210,7 @@ const DeliveryPartnerSchema = new mongoose.Schema({
     name: { type: String, required: true },
     phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
+    profilePic: String, // Base64 Image
     vehicle: { type: String, default: 'Moto' }, // Moto, Bici, Auto
     status: { type: String, default: 'offline' }, // offline, online, busy
     currentLocation: {
@@ -960,7 +961,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/driver/register', async (req, res) => {
-    const { name, phone, password, vehicle } = req.body;
+    const { name, phone, password, vehicle, profilePic } = req.body;
     if (!name || !phone || !password) return res.status(400).json({ error: "Datos incompletos" });
 
     try {
@@ -971,6 +972,7 @@ app.post('/api/driver/register', async (req, res) => {
             name,
             phone,
             password,
+            profilePic: profilePic || null,
             vehicle: vehicle || 'moto',
             status: 'offline',
             earnings: 0

@@ -344,7 +344,44 @@ const checkDailyReset = (shop) => {
         shop.stats.lastReset = today;
         return true;
     }
-    return false;
+};
+
+const getDriverStats = async (driverId) => {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    // 1. Earnings Today (Commission + Tip)
+    const todayOrders = await Order.find({
+        driverId: driverId,
+        status: 'completed',
+        createdAt: { $gte: startOfDay }
+    });
+
+    // Sum shipping (driver fee) + tip
+    const earningsToday = todayOrders.reduce((acc, o) => {
+        const shipping = o.costs?.shipping || 0;
+        const tip = o.costs?.tip || 0;
+        return acc + shipping + tip;
+    }, 0);
+
+    // 2. Cash Debt (Total Cash Orders - Earnings from those orders)
+    // We sum ALL cash orders ever. 
+    const cashOrders = await Order.find({
+        driverId: driverId,
+        status: 'completed',
+        paymentMethod: 'Efectivo'
+    });
+
+    const totalCashCollected = cashOrders.reduce((acc, o) => acc + (parseFloat(o.total) || 0), 0);
+
+    // Earnings from those specific cash orders (he keeps this)
+    const earningsFromCash = cashOrders.reduce((acc, o) => {
+        return acc + (o.costs?.shipping || 0) + (o.costs?.tip || 0);
+    }, 0);
+
+    const debt = totalCashCollected - earningsFromCash;
+
+    return { earningsToday, debt };
 };
 
 // --- SOCKET.IO EVENTS ---
@@ -464,7 +501,13 @@ io.on('connection', (socket) => {
         if (driver) {
             socket.join('drivers'); // General room for broadcasting available orders
             socket.join(`driver_${driver._id}`); // Private room
-            socket.emit('login-success', driver);
+
+            // STATS
+            const stats = await getDriverStats(driver._id);
+            const driverData = driver.toObject();
+            driverData.stats = stats;
+
+            socket.emit('login-success', driverData);
 
             // Send any pending orders immediately (INTELLIGENT FILTER)
             const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
@@ -494,6 +537,10 @@ io.on('connection', (socket) => {
     socket.on('driver-online', async (driverId) => {
         await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'online' });
         socket.join('drivers');
+
+        // STATS UPDATE
+        const stats = await getDriverStats(driverId);
+        socket.emit('stats-update', stats);
 
         // Send pending orders to this driver who just came online (INTELLIGENT FILTER)
         const driver = await DeliveryPartner.findById(driverId); // Need to fetch loc

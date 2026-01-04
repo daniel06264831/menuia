@@ -227,10 +227,113 @@ const DeliveryPartner = mongoose.model('DeliveryPartner', DeliveryPartnerSchema)
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 
-// --- MODO API BACKEND ---
-// Comentamos esto porque tu frontend está en un HOSTING EXTERNO.
-// app.use(express.static(path.join(__dirname, 'public')));
-// app.use(express.static(__dirname));
+// --- MODO API BACKEND + FRONTEND ---
+// Habilitamos esto para que la App Android pueda cargar el HTML desde Render
+app.use(express.static(__dirname));
+
+// --- INTELLIGENT DISPATCHER & GEO UTILS ---
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 9999;
+    const R = 6371; // Radius of the earth in km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+};
+
+const distributeOrder = async (order, force = false) => {
+    try {
+        if (!order.shopCoords || !order.shopCoords.lat) {
+            console.log("⚠️ Order missing shop coords, broadcasting to all online.");
+            io.to('drivers').emit('new-request', order);
+            return;
+        }
+
+        // 1. Get Candidates (Online or Busy)
+        // We include busy to check for batching opportunities
+        const candidates = await DeliveryPartner.find({
+            status: { $in: ['online', 'busy'] },
+            currentLocation: { $exists: true }
+        });
+
+        const scoredDrivers = [];
+
+        for (const driver of candidates) {
+            // A. Distance Check
+            const dist = calculateDistance(
+                driver.currentLocation.lat, driver.currentLocation.lng,
+                order.shopCoords.lat, order.shopCoords.lng
+            );
+
+            // Constraint: Max 3km (unless force/retry mode)
+            const maxDist = force ? 10 : 3;
+            if (dist > maxDist) continue;
+
+            let score = 100;
+
+            // B. Distance Factor (Closer is better)
+            // -10 points per km
+            score -= (dist * 10);
+
+            // C. Batching Logic (The "AI" part)
+            // Check if driver is busy with an order from THE SAME RESTAURANT
+            if (driver.status === 'busy') {
+                const activeOrders = await Order.find({
+                    driverId: driver._id,
+                    status: { $in: ['driver_assigned', 'to_store', 'at_store'] } // only if not yet delivered
+                });
+
+                if (activeOrders.length > 0) {
+                    // Check if any active order is from the same shop
+                    const sameShop = activeOrders.some(o => o.shopSlug === order.shopSlug);
+                    if (sameShop) {
+                        // HUGE BOOST for batching (Assign multiples to same driver)
+                        score += 500;
+                        console.log(`🚀 Oportunidad de Batching para ${driver.name}`);
+                    } else {
+                        // Driver is busy with OTHER shop -> Exclude for now
+                        continue;
+                    }
+                }
+            }
+
+            // D. Equity / Randomness (To avoid same driver getting all requests if others are close)
+            // Agregamos un factor aleatorio de 0-20 puntos para distribuir equitativamente
+            score += Math.random() * 20;
+
+            scoredDrivers.push({ driver, score, dist });
+        }
+
+        // Sort by Score DESC
+        scoredDrivers.sort((a, b) => b.score - a.score);
+
+        // Emit to Top Candidates
+        if (scoredDrivers.length > 0) {
+            console.log(`✅ Distribuyendo orden ${order.ref} a ${scoredDrivers.length} conductores.`);
+
+            scoredDrivers.forEach(d => {
+                console.log(`   -> ${d.driver.name}: Score ${d.score.toFixed(0)}, Dist ${d.dist.toFixed(2)}km`);
+                // Send specific event to their private room
+                io.to(`driver_${d.driver._id}`).emit('new-request', order);
+            });
+        } else {
+            console.log("⚠️ No hay conductores válidos cerca (<3km).");
+            if (force) {
+                // Last resort: Broadcast to all online
+                io.to('drivers').emit('new-request', order);
+            }
+        }
+
+    } catch (e) {
+        console.error("Error distributing order:", e);
+        // Fail-safe
+        io.to('drivers').emit('new-request', order);
+    }
+};
 
 // --- HELPERS stats DIARIOS ---
 const checkDailyReset = (shop) => {
@@ -327,18 +430,19 @@ io.on('connection', (socket) => {
                         createdAt: new Date()
                     });
 
-                    // Broadcast to Drivers if Delivery
-                    if (newOrder.type === 'delivery') {
-                        io.to('drivers').emit('new-request', newOrder);
 
-                        // RE-BROADCAST TIMER (2 Minutes)
+                    // INTELLIGENT DISTRIBUTION LOGIC
+                    if (newOrder.type === 'delivery') {
+                        distributeOrder(newOrder);
+
+                        // Retry logic (Fallback to wider range or re-notify after 2 min)
                         setTimeout(async () => {
                             const checkOrder = await Order.findById(newOrder._id);
                             if (checkOrder && checkOrder.deliveryStatus === 'pending_assignment' && checkOrder.status !== 'cancelled') {
-                                console.log(`🔄 Re-broadcasting Order ${checkOrder.ref} to drivers`);
-                                io.to('drivers').emit('new-request', checkOrder);
+                                console.log(`🔄 Re-trying distribution for Order ${checkOrder.ref}`);
+                                distributeOrder(checkOrder, true); // true = force/widen search
                             }
-                        }, 120000); // 2 minutes
+                        }, 120000);
                     }
 
                     io.to(slug).emit('new-order-saved');
@@ -362,10 +466,15 @@ io.on('connection', (socket) => {
             socket.join(`driver_${driver._id}`); // Private room
             socket.emit('login-success', driver);
 
-            // Send any pending orders immediately
+            // Send any pending orders immediately (INTELLIGENT FILTER)
             const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
             pendingOrders.forEach(o => {
-                socket.emit('new-request', o);
+                if (driver.currentLocation && o.shopCoords) {
+                    const d = calculateDistance(driver.currentLocation.lat, driver.currentLocation.lng, o.shopCoords.lat, o.shopCoords.lng);
+                    if (d <= 3) {
+                        socket.emit('new-request', o);
+                    }
+                }
             });
 
             // CHECK & SEND ACTIVE ORDER (Persistence Fix)
@@ -386,10 +495,16 @@ io.on('connection', (socket) => {
         await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'online' });
         socket.join('drivers');
 
-        // Send pending orders to this driver who just came online
+        // Send pending orders to this driver who just came online (INTELLIGENT FILTER)
+        const driver = await DeliveryPartner.findById(driverId); // Need to fetch loc
         const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
         pendingOrders.forEach(o => {
-            socket.emit('new-request', o);
+            if (driver && driver.currentLocation && o.shopCoords) {
+                const d = calculateDistance(driver.currentLocation.lat, driver.currentLocation.lng, o.shopCoords.lat, o.shopCoords.lng);
+                if (d <= 3) {
+                    socket.emit('new-request', o);
+                }
+            }
         });
 
         // CHECK & SEND ACTIVE ORDER (Persistence Fix)
@@ -795,6 +910,44 @@ app.post('/api/register', async (req, res) => {
         await Shop.create(newShopData);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error interno" }); }
+});
+
+app.post('/api/driver/register', async (req, res) => {
+    const { name, phone, password, vehicle } = req.body;
+    if (!name || !phone || !password) return res.status(400).json({ error: "Datos incompletos" });
+
+    try {
+        const existing = await DeliveryPartner.findOne({ phone });
+        if (existing) return res.status(400).json({ error: "El número de celular ya está registrado." });
+
+        const newDriver = await DeliveryPartner.create({
+            name,
+            phone,
+            password,
+            vehicle: vehicle || 'moto',
+            status: 'offline',
+            earnings: 0
+        });
+
+        res.json({ success: true, driver: newDriver });
+    } catch (e) {
+        console.error("Driver register error:", e);
+        res.status(500).json({ error: "Error al registrar repartidor." });
+    }
+});
+
+app.post('/api/driver/login', async (req, res) => {
+    const { phone, password } = req.body;
+    try {
+        const driver = await DeliveryPartner.findOne({ phone, password });
+        if (driver) {
+            res.json({ success: true, driver: driver });
+        } else {
+            res.status(401).json({ error: "Credenciales inválidas" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: "Error interno" });
+    }
 });
 
 app.post('/api/login', async (req, res) => {

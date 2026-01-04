@@ -212,6 +212,8 @@ const DeliveryPartnerSchema = new mongoose.Schema({
     password: { type: String, required: true },
     profilePic: String, // Base64 Image
     vehicle: { type: String, default: 'Moto' }, // Moto, Bici, Auto
+    verificationStatus: { type: String, default: 'pending' }, // pending, verified, rejected
+    rejectionReason: String,
     status: { type: String, default: 'offline' }, // offline, online, busy
     currentLocation: {
         lat: Number,
@@ -536,7 +538,20 @@ io.on('connection', (socket) => {
     });
 
     socket.on('driver-online', async (driverId) => {
-        await DeliveryPartner.findByIdAndUpdate(driverId, { status: 'online' });
+        const driver = await DeliveryPartner.findById(driverId);
+        if (!driver) return;
+
+        if (driver.verificationStatus !== 'verified') {
+            return socket.emit('verification-error', {
+                status: driver.verificationStatus,
+                message: driver.verificationStatus === 'rejected'
+                    ? `Tu solicitud fue rechazada: ${driver.rejectionReason}`
+                    : "Tu cuenta está pendiente de aprobación."
+            });
+        }
+
+        driver.status = 'online';
+        await driver.save();
         socket.join('drivers');
 
         // STATS UPDATE
@@ -544,7 +559,7 @@ io.on('connection', (socket) => {
         socket.emit('stats-update', stats);
 
         // Send pending orders to this driver who just came online (INTELLIGENT FILTER)
-        const driver = await DeliveryPartner.findById(driverId); // Need to fetch loc
+        // driver is already fetched above
         const pendingOrders = await Order.find({ type: 'delivery', deliveryStatus: 'pending_assignment' });
         pendingOrders.forEach(o => {
             if (driver && driver.currentLocation && o.shopCoords) {
@@ -1506,6 +1521,66 @@ app.post('/api/superadmin/approve-payment', async (req, res) => {
         await shop.save();
         res.json({ success: true, validUntil: startDate });
     } catch (e) { res.status(500).json({ error: "Error al activar" }); }
+});
+
+// --- DRIVER VERIFICATION & FINANCIALS ---
+app.post('/api/admin/driver-action', async (req, res) => {
+    const { masterKey, driverId, action, reason } = req.body; // action: 'approve' | 'reject'
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+
+    try {
+        const driver = await DeliveryPartner.findById(driverId);
+        if (!driver) return res.status(404).json({ error: "Repartidor no encontrado" });
+
+        if (action === 'approve') {
+            driver.verificationStatus = 'verified';
+            driver.rejectionReason = "";
+        } else if (action === 'reject') {
+            driver.verificationStatus = 'rejected';
+            driver.rejectionReason = reason || "Documentación incompleta";
+            driver.status = 'offline'; // Force offline
+            // Disconnect socket if online? Handled by frontend polling or socket emit
+        }
+        await driver.save();
+        res.json({ success: true, verificationStatus: driver.verificationStatus });
+    } catch (e) { res.status(500).json({ error: "Error procesando solicitud" }); }
+});
+
+app.get('/api/admin/financials', async (req, res) => {
+    const { masterKey } = req.query;
+    if (masterKey !== SUPER_ADMIN_PASS) return res.status(403).json({ error: "Acceso denegado" });
+
+    try {
+        // Driver Stats
+        const drivers = await DeliveryPartner.find({}, 'name phone earnings verificationStatus');
+        const driverFinancials = await Promise.all(drivers.map(async (d) => {
+            const stats = await getDriverStats(d._id);
+            return {
+                id: d._id,
+                name: d.name,
+                phone: d.phone,
+                status: d.verificationStatus,
+                earnings: stats.earningsToday,
+                debt: stats.debt,
+                totalEarnings: d.earnings
+            };
+        }));
+
+        // Shop Stats
+        const shops = await Shop.find({}, 'slug config.name stats');
+        const shopFinancials = shops.map(s => ({
+            slug: s.slug,
+            name: s.config.name,
+            orders: s.stats.orders,
+            salesMonth: 0 // Simplification
+        }));
+
+        res.json({ success: true, drivers: driverFinancials, shops: shopFinancials });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Error obteniendo finanzas" });
+    }
 });
 
 // --- MODO API: RUTAS FRONTEND ELIMINADAS ---

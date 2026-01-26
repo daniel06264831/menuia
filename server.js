@@ -1,12 +1,14 @@
 const express = require('express');
 const path = require('path');
 const mongoose = require('mongoose');
+const cors = require('cors'); // Importar CORS
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware para parsear JSON
+// Middleware
+app.use(cors()); // Permitir peticiones desde cualquier origen (Hosting)
 app.use(express.json());
-app.use(express.static(__dirname));
+// app.use(express.static(__dirname)); // ELIMINADO: Ya no servimos estáticos
 
 // --- MONGODB CONNECTION ---
 const mongoUri = "mongodb+srv://sosushi:Hola2025@cluster0.kerhufq.mongodb.net/?appName=Cluster0";
@@ -153,11 +155,13 @@ app.post('/api/config/high-demand', async (req, res) => {
     }
 });
 
-// Servir páginas específicas
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
-app.get('/delivery', (req, res) => res.sendFile(path.join(__dirname, 'delivery.html')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+// Servir páginas específicas (ELIMINADO: El frontend está en otro hosting)
+app.get('/', (req, res) => {
+    res.send("🚀 So Sushi API is running using MongoDB Atlas");
+});
+// app.get('/admin', ...);
+// app.get('/delivery', ...);
 
-app.listen(port, () => {
-    console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`🚀 Servidor API corriendo en puerto ${port}`);
 });

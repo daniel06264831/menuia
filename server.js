@@ -153,6 +153,89 @@ app.post('/api/config/high-demand', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+
+});
+
+// --- AUTH SYSTEM (User Registration & Login) ---
+const crypto = require('crypto');
+
+// User Schema
+const userSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    phone: { type: String, required: true, unique: true },
+    salt: String,
+    hash: String,
+    createdAt: { type: Date, default: Date.now }
+});
+
+// Method to set password
+userSchema.methods.setPassword = function (password) {
+    this.salt = crypto.randomBytes(16).toString('hex');
+    this.hash = crypto.pbkdf2Sync(password, this.salt, 1000, 64, 'sha512').toString('hex');
+};
+
+// Method to check password
+userSchema.methods.validPassword = function (password) {
+    const hash = crypto.pbkdf2Sync(password, this.salt, 1000, 64, 'sha512').toString('hex');
+    return this.hash === hash;
+};
+
+const User = mongoose.model('User', userSchema);
+
+// 6. Registro de Usuario
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { name, phone, password } = req.body;
+
+        if (!name || !phone || !password) {
+            return res.status(400).json({ success: false, message: "Todos los campos son obligatorios" });
+        }
+
+        const existingUser = await User.findOne({ phone });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "El teléfono ya está registrado" });
+        }
+
+        const user = new User({ name, phone });
+        user.setPassword(password);
+        await user.save();
+
+        res.status(201).json({
+            success: true,
+            message: "Usuario registrado",
+            user: { id: user._id, name: user.name, phone: user.phone }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error en el servidor", error: error.message });
+    }
+});
+
+// 7. Login de Usuario
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { phone, password } = req.body;
+
+        if (!phone || !password) {
+            return res.status(400).json({ success: false, message: "Faltan datos" });
+        }
+
+        const user = await User.findOne({ phone });
+        if (!user) {
+            return res.status(401).json({ success: false, message: "Usuario no encontrado" });
+        }
+
+        if (!user.validPassword(password)) {
+            return res.status(401).json({ success: false, message: "Contraseña incorrecta" });
+        }
+
+        res.json({
+            success: true,
+            message: "Bienvenido",
+            user: { id: user._id, name: user.name, phone: user.phone }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error en servidor" });
+    }
 });
 
 // Servir páginas específicas (ELIMINADO: El frontend está en otro hosting)

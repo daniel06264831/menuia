@@ -156,6 +156,38 @@ app.post('/api/config/high-demand', async (req, res) => {
 
 });
 
+// 6. Configuración: Horarios y Cierre de Emergencia
+app.get('/api/config/hours', async (req, res) => {
+    try {
+        let config = await Config.findOne({ key: 'store_hours' });
+        if (!config) {
+            // Default hours: 4 PM - 11 PM, Open
+            await Config.create({
+                key: 'store_hours',
+                value: { open: 16, close: 23, force_close: false }
+            });
+            config = { value: { open: 16, close: 23, force_close: false } };
+        }
+        res.json(config.value);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/config/hours', async (req, res) => {
+    try {
+        const { open, close, force_close } = req.body;
+        const config = await Config.findOneAndUpdate(
+            { key: 'store_hours' },
+            { value: { open, close, force_close } },
+            { upsert: true, new: true }
+        );
+        res.json({ success: true, config: config.value });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // --- AUTH SYSTEM (User Registration & Login) ---
 const crypto = require('crypto');
 

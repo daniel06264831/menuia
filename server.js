@@ -65,6 +65,12 @@ const orderSchema = new mongoose.Schema({
     total: Number,
     shippingCost: Number,
     distanceKm: Number,
+    coupon: {
+        code: String,
+        type: String, // 'ITEM' or 'CASH'
+        description: String,
+        amount: Number
+    },
     status: {
         type: String,
         enum: ['pending', 'cooking', 'ready', 'delivering', 'completed', 'cancelled'],
@@ -136,7 +142,33 @@ app.get('/api/menu', (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
     try {
-        const newOrder = new Order(req.body);
+        const orderData = req.body;
+
+        // --- COUPON VALIDATION & REDEMPTION ---
+        if (orderData.couponCode) {
+            const user = await User.findOne({ phone: orderData.customer.phone });
+            if (user) {
+                const couponIndex = user.coupons.findIndex(c => c.code === orderData.couponCode && c.active);
+                if (couponIndex !== -1) {
+                    const coupon = user.coupons[couponIndex];
+
+                    // Attach coupon to order
+                    orderData.coupon = {
+                        code: coupon.code,
+                        type: coupon.type || 'CASH',
+                        description: coupon.description || `Descuento $${coupon.amount}`,
+                        amount: coupon.amount || 0
+                    };
+
+                    // Mark as used
+                    user.coupons[couponIndex].active = false;
+                    await user.save();
+                    console.log(`🎟️ Coupon ${coupon.code} redeemed by ${user.name}`);
+                }
+            }
+        }
+
+        const newOrder = new Order(orderData);
         const savedOrder = await newOrder.save();
         io.emit('new-order', savedOrder);
 
@@ -349,3 +381,4 @@ app.get('/', (req, res) => {
 server.listen(port, () => {
     console.log(`🚀 Servidor API + Socket.IO corriendo en puerto ${port}`);
 });
+

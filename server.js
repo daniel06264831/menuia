@@ -281,6 +281,12 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ success: false, message: "Contraseña incorrecta" });
         }
 
+        // --- BACKFILL REFERRAL CODE FOR OLD USERS ---
+        if (!user.referralCode) {
+            user.referralCode = generateReferralCode();
+            await user.save();
+        }
+
         res.json({
             success: true,
             message: "Bienvenido",
@@ -295,6 +301,13 @@ app.get('/api/users/:id', async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ error: "User not found" });
+
+        // --- BACKFILL REFERRAL CODE FOR OLD USERS ---
+        if (!user.referralCode) {
+            user.referralCode = generateReferralCode();
+            await user.save();
+        }
+
         res.json({ id: user._id, name: user.name, phone: user.phone, referralCode: user.referralCode, coupons: user.coupons });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

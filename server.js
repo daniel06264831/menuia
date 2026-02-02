@@ -81,9 +81,12 @@ const userSchema = new mongoose.Schema({
     salt: String,
     hash: String,
     referralCode: { type: String, unique: true }, // Código único de este usuario
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Quien lo invitó
     coupons: [{
         code: String,
-        amount: Number,
+        amount: Number, // Optional now
+        description: String, // "Coca Gratis", etc.
+        type: { type: String, default: 'CASH' }, // 'CASH' or 'ITEM'
         active: { type: Boolean, default: true },
         source: String
     }],
@@ -136,6 +139,37 @@ app.post('/api/orders', async (req, res) => {
         const newOrder = new Order(req.body);
         const savedOrder = await newOrder.save();
         io.emit('new-order', savedOrder);
+
+        // --- REFERRAL CONVERSION CHECK ---
+        // Check if this is the customer's FIRST order
+        const orderCount = await Order.countDocuments({ 'customer.phone': req.body.customer.phone });
+        if (orderCount === 1) { // This is the first one
+            // Find the user by phone to check if they were referred
+            const user = await User.findOne({ phone: req.body.customer.phone }).populate('referredBy');
+
+            if (user && user.referredBy) {
+                const referrer = user.referredBy;
+
+                // Pick Random Reward
+                const rewards = [
+                    { desc: "Coca Cola Gratis 🥤", type: "ITEM" },
+                    { desc: "Yakimesi Sencillo 🍚", type: "ITEM" },
+                    { desc: "Bolitas de Camarón 🍤", type: "ITEM" }
+                ];
+                const prize = rewards[Math.floor(Math.random() * rewards.length)];
+
+                referrer.coupons.push({
+                    code: 'GIFT-' + generateReferralCode(),
+                    description: prize.desc,
+                    type: prize.type,
+                    amount: 0,
+                    source: user.name + " (1er Pedido)"
+                });
+                await referrer.save();
+                console.log(`🎁 Reward granted to ${referrer.name}: ${prize.desc}`);
+            }
+        }
+
         res.status(201).json({ success: true, orderId: savedOrder._id });
     } catch (error) {
         console.error("Error al crear pedido:", error);
@@ -243,12 +277,8 @@ app.post('/api/auth/register', async (req, res) => {
         if (referredByCode && referredByCode.length === 6) {
             const referrer = await User.findOne({ referralCode: referredByCode.toUpperCase() });
             if (referrer) {
-                referrer.coupons.push({
-                    code: 'REF-' + generateReferralCode(),
-                    amount: 50,
-                    source: name
-                });
-                await referrer.save();
+                // Link users, BUT DO NOT REWARD YET
+                user.referredBy = referrer._id;
             }
         }
 
